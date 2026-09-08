@@ -14,7 +14,8 @@ A production-quality, browser-based **WebAR application** that allows users to u
 - **Three.js PBR Pipeline**: ACES Filmic tone mapping, ambient hemisphere & directional key/fill lights, and shadow maps to ensure models render with vibrant fidelity.
 - **Built-in 3D Assets**: Pre-loaded with procedural binary GLB models (Tactical Helicopter, Quadcopter Drone, Cyber Sentinel Robot, Hyper Cybercar).
 - **Studio Configurator**: Real-time 3D OrbitControls preview, scale/height/offset tuning, custom `.glb` upload, and high-resolution printable QR generator.
-- **Dark Glassmorphism HUD**: Responsive status indicators (`SEARCHING`, `QR DETECTED`, `TRACKING`, `QR LOST`), scale stepper, auto-rotation toggle, and fullscreen mode.
+- **Continuous Multi-Scanner Auto-Detection**: Keep the camera open and sweep across multiple different printed scanners. The system automatically identifies each scanner QR marker in real-time, displays a scanner badge, and seamlessly swaps to the corresponding 3D model with zero reloading and zero camera interruption.
+- **In-Memory 3D Asset Cache**: Pre-cached GLB models ensure instant (< 10ms) switching when moving back and forth between different physical markers.
 - **Zero-Build Deployment**: Works out of the box on GitHub Pages or any static HTTPS host.
 
 ---

@@ -151,6 +151,62 @@ html, body {
   100% { transform: scale(1.25); opacity: 1.0; }
 }
 
+/* Real-Time Auto-Scanner Identification Toast */
+.scanner-toast {
+  align-self: center;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1.5px solid rgba(56, 189, 248, 0.8);
+  border-radius: var(--radius-lg);
+  padding: 0.75rem 1.4rem;
+  backdrop-filter: blur(20px);
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  box-shadow: 0 8px 32px rgba(56, 189, 248, 0.25), 0 4px 16px rgba(0, 0, 0, 0.6);
+  animation: slide-toast 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  margin-top: 0.5rem;
+  pointer-events: none;
+  max-width: 90vw;
+}
+
+.scanner-toast-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(2, 132, 199, 0.4), rgba(56, 189, 248, 0.2));
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #38bdf8;
+  flex-shrink: 0;
+}
+
+.scanner-toast-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.scanner-toast-subtitle {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #38bdf8;
+  text-transform: uppercase;
+}
+
+.scanner-toast-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+@keyframes slide-toast {
+  0% { transform: translateY(-12px) scale(0.95); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
 /* Tracking Lost Notification Banner */
 .lost-banner {
   align-self: center;

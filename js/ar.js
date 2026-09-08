@@ -13,6 +13,7 @@ import { getModelBlobUrl } from './procedural-models.js';
 export class ArExperience {
   constructor() {
     this.modelId = 'helicopter';
+    this.customModelUrl = null;
     this.modelLoader = new ModelLoader();
     this.model = null;
     this.markerGroup = new THREE.Group();
@@ -29,8 +30,11 @@ export class ArExperience {
       autoRotateSpeed: AR_CONFIG.defaults.autoRotateSpeed
     };
 
-    // Tracking state
+    // Tracking & Scanner Switching State
     this.isTrackingActive = false;
+    this.isLoadingModel = false;
+    this.scannerToastTimeout = null;
+    this.lastDecodedRaw = null;
     this.lastFrameTime = performance.now();
 
     // Initialize UI & Components
@@ -41,6 +45,7 @@ export class ArExperience {
     this.initCamera();
     this.load3dModel();
     this.bindControls();
+    this.preloadRegisteredModels();
   }
 
   parseUrlParams() {
@@ -84,6 +89,11 @@ export class ArExperience {
     this.errorModal = document.getElementById('error-modal');
     this.errorMsg = document.getElementById('error-modal-msg');
     this.modelNameLabel = document.getElementById('hud-model-name');
+
+    // Auto-Scanner Toast notification
+    this.scannerToast = document.getElementById('scanner-detected-toast');
+    this.scannerToastTitle = document.getElementById('scanner-toast-title');
+    this.scannerToastSubtitle = document.getElementById('scanner-toast-subtitle');
 
     // Controls
     this.btnScaleMinus = document.getElementById('btn-scale-minus');
@@ -189,10 +199,250 @@ export class ArExperience {
       cameraFov: AR_CONFIG.cameraFov,
       onStatusChange: (status) => this.handleTrackingStatus(status),
       onPoseUpdate: (pose) => this.handlePoseUpdate(pose),
-      onQrDecoded: (data) => {
-        console.log("Tracked QR Code decoded URL:", data);
-      }
+      onQrDecoded: (data) => this.handleQrDecoded(data)
     });
+  }
+
+  /**
+   * Parse arbitrary QR payload: URLs, query parameters, JSON, or direct model names
+   */
+  parseQrData(data) {
+    if (typeof data !== 'string') return null;
+    const trimmed = data.trim();
+    if (!trimmed) return null;
+
+    let targetId = null;
+    let customModelUrl = null;
+    let params = null;
+    let hasCustomParams = false;
+
+    // 1. JSON payload
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const obj = JSON.parse(trimmed);
+        if (obj.id || obj.modelId || obj.model) {
+          targetId = obj.id || obj.modelId || obj.model;
+        }
+        if (obj.modelUrl) customModelUrl = obj.modelUrl;
+        const config = {};
+        if (obj.scale !== undefined) { config.scale = parseFloat(obj.scale); hasCustomParams = true; }
+        if (obj.height !== undefined) { config.height = parseFloat(obj.height); hasCustomParams = true; }
+        if (obj.ox !== undefined) { config.offsetX = parseFloat(obj.ox); hasCustomParams = true; }
+        if (obj.oz !== undefined) { config.offsetZ = parseFloat(obj.oz); hasCustomParams = true; }
+        if (obj.rot !== undefined) { config.rotationY = (parseFloat(obj.rot) * Math.PI) / 180.0; hasCustomParams = true; }
+        if (obj.ar !== undefined) { config.autoRotate = obj.ar === true || obj.ar === 1 || obj.ar === '1'; hasCustomParams = true; }
+        if (obj.spd !== undefined) { config.autoRotateSpeed = parseFloat(obj.spd); hasCustomParams = true; }
+        return { modelId: targetId, customModelUrl, config, hasCustomParams };
+      } catch (e) {}
+    }
+
+    // 2. Full URL, Relative URL or Query string
+    try {
+      let urlObj = null;
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+        urlObj = new URL(trimmed);
+      } else if (trimmed.includes('?') || trimmed.startsWith('ar.html') || trimmed.startsWith('/ar.html')) {
+        urlObj = new URL(trimmed, window.location.origin);
+      }
+      if (urlObj) {
+        params = urlObj.searchParams;
+      }
+    } catch (e) {}
+
+    if (!params && (trimmed.includes('id=') || trimmed.includes('&') || trimmed.includes('='))) {
+      try {
+        params = new URLSearchParams(trimmed.startsWith('?') ? trimmed.slice(1) : trimmed);
+      } catch (e) {}
+    }
+
+    if (params) {
+      if (params.has('id')) targetId = params.get('id');
+      if (params.has('model')) targetId = params.get('model');
+      if (params.has('modelUrl')) customModelUrl = params.get('modelUrl');
+
+      const config = {};
+      if (params.has('scale')) { config.scale = parseFloat(params.get('scale')); hasCustomParams = true; }
+      if (params.has('height')) { config.height = parseFloat(params.get('height')); hasCustomParams = true; }
+      if (params.has('ox')) { config.offsetX = parseFloat(params.get('ox')); hasCustomParams = true; }
+      if (params.has('oz')) { config.offsetZ = parseFloat(params.get('oz')); hasCustomParams = true; }
+      if (params.has('rot')) { config.rotationY = (parseFloat(params.get('rot')) * Math.PI) / 180.0; hasCustomParams = true; }
+      if (params.has('ar')) { config.autoRotate = params.get('ar') === '1' || params.get('ar') === 'true'; hasCustomParams = true; }
+      if (params.has('spd')) { config.autoRotateSpeed = parseFloat(params.get('spd')); hasCustomParams = true; }
+      if (params.has('speed')) { config.autoRotateSpeed = parseFloat(params.get('speed')); hasCustomParams = true; }
+
+      if (targetId || customModelUrl) {
+        return { modelId: targetId || this.modelId, customModelUrl, config, hasCustomParams };
+      }
+    }
+
+    // 3. Direct model identifier or known alias
+    const cleanKey = trimmed.toLowerCase().replace(/[\s-]+/g, '_');
+    if (AR_CONFIG.models[cleanKey]) {
+      return { modelId: cleanKey, customModelUrl: null, config: {}, hasCustomParams: false };
+    }
+
+    for (const key of Object.keys(AR_CONFIG.models)) {
+      if (cleanKey.includes(key)) {
+        return { modelId: key, customModelUrl: null, config: {}, hasCustomParams: false };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Handle QR decoded callback from 6DOF tracker
+   */
+  handleQrDecoded(rawDecodedData) {
+    if (!rawDecodedData) return;
+    if (rawDecodedData === this.lastDecodedRaw) return;
+    this.lastDecodedRaw = rawDecodedData;
+
+    const parsed = this.parseQrData(rawDecodedData);
+    if (!parsed || !parsed.modelId) return;
+
+    // Check if it matches current active model and config
+    if (parsed.modelId === this.modelId && parsed.customModelUrl === this.customModelUrl && !parsed.hasCustomParams) {
+      return;
+    }
+
+    console.log(`[Auto-Scanner] Detected new scanner code -> Switching to model: ${parsed.modelId}`);
+    this.switchModel(parsed);
+  }
+
+  /**
+   * Seamlessly switch the active 3D model while camera is open and running
+   */
+  async switchModel(parsed) {
+    const { modelId, customModelUrl, config: customConfig } = parsed;
+    if (this.isLoadingModel) return;
+    this.isLoadingModel = true;
+
+    this.modelId = modelId;
+    this.customModelUrl = customModelUrl || null;
+
+    const preset = AR_CONFIG.models[this.modelId];
+    const modelDisplayName = preset ? preset.name : (this.modelId ? this.modelId.toUpperCase() : 'Custom Model');
+
+    // Update configuration parameters
+    if (preset) {
+      this.config.scale = customConfig?.scale !== undefined ? customConfig.scale : preset.scale;
+      this.config.height = customConfig?.height !== undefined ? customConfig.height : preset.height;
+      this.config.offsetX = customConfig?.offsetX !== undefined ? customConfig.offsetX : (preset.offsetX || 0);
+      this.config.offsetZ = customConfig?.offsetZ !== undefined ? customConfig.offsetZ : (preset.offsetZ || 0);
+      this.config.rotationY = customConfig?.rotationY !== undefined ? customConfig.rotationY : (preset.rotationY || 0);
+      this.config.autoRotate = customConfig?.autoRotate !== undefined ? customConfig.autoRotate : (preset.autoRotate || false);
+      if (customConfig?.autoRotateSpeed !== undefined) {
+        this.config.autoRotateSpeed = customConfig.autoRotateSpeed;
+      }
+    } else {
+      if (customConfig?.scale !== undefined) this.config.scale = customConfig.scale;
+      if (customConfig?.height !== undefined) this.config.height = customConfig.height;
+      if (customConfig?.offsetX !== undefined) this.config.offsetX = customConfig.offsetX;
+      if (customConfig?.offsetZ !== undefined) this.config.offsetZ = customConfig.offsetZ;
+      if (customConfig?.rotationY !== undefined) this.config.rotationY = customConfig.rotationY;
+      if (customConfig?.autoRotate !== undefined) this.config.autoRotate = customConfig.autoRotate;
+      if (customConfig?.autoRotateSpeed !== undefined) this.config.autoRotateSpeed = customConfig.autoRotateSpeed;
+    }
+
+    this.initialConfig = { ...this.config };
+
+    // Update HUD Model Label
+    if (this.modelNameLabel) {
+      this.modelNameLabel.textContent = modelDisplayName.toUpperCase();
+    }
+    this.updateControlsUI();
+
+    // Show scanner detection toast immediately
+    this.showScannerToast(modelDisplayName, "SCANNER IDENTIFIED");
+
+    // Update browser URL state without page reload
+    try {
+      const newUrl = new URL(window.location.href);
+      newUrl.searchParams.set('id', this.modelId);
+      if (this.customModelUrl) newUrl.searchParams.set('modelUrl', this.customModelUrl);
+      else newUrl.searchParams.delete('modelUrl');
+      window.history.replaceState({}, '', newUrl.toString());
+    } catch (e) {}
+
+    // Resolve model source URL
+    let modelSourceUrl;
+    if (this.customModelUrl) {
+      modelSourceUrl = this.customModelUrl;
+    } else if (preset?.isProcedural || ['helicopter', 'drone', 'robot', 'car'].includes(this.modelId)) {
+      modelSourceUrl = getModelBlobUrl(this.modelId);
+    } else if (preset?.file) {
+      modelSourceUrl = preset.file;
+    } else {
+      modelSourceUrl = `models/${this.modelId}.glb`;
+    }
+
+    try {
+      const newModel = await this.modelLoader.load(modelSourceUrl, (percent) => {
+        if (percent < 100) {
+          this.showScannerToast(`Loading ${modelDisplayName}... ${percent}%`, "SCANNER IDENTIFIED", 1500);
+        }
+      });
+
+      // Swap model in 3D scene smoothly
+      if (this.model && this.markerGroup) {
+        this.markerGroup.remove(this.model);
+      }
+
+      this.model = newModel;
+      this.markerGroup.add(newModel);
+      this.updateModelTransform();
+      this.showScannerToast(modelDisplayName, "3D MODEL ACTIVE", 2500);
+    } catch (err) {
+      console.error("Failed to switch model in real time:", err);
+      this.showScannerToast(`Failed to load ${modelDisplayName}`, "ERROR", 3000);
+    } finally {
+      this.isLoadingModel = false;
+    }
+  }
+
+  /**
+   * Display HUD Toast Notification for Scanner Detection
+   */
+  showScannerToast(title, subtitle = "SCANNER DETECTED", duration = 2500) {
+    if (!this.scannerToast) return;
+    if (this.scannerToastTitle) this.scannerToastTitle.textContent = title;
+    if (this.scannerToastSubtitle) this.scannerToastSubtitle.textContent = subtitle;
+
+    this.scannerToast.style.display = 'flex';
+    this.scannerToast.classList.add('active');
+
+    if (this.scannerToastTimeout) clearTimeout(this.scannerToastTimeout);
+    this.scannerToastTimeout = setTimeout(() => {
+      if (this.scannerToast) {
+        this.scannerToast.style.display = 'none';
+        this.scannerToast.classList.remove('active');
+      }
+    }, duration);
+  }
+
+  /**
+   * Preload registered models in background to make multi-scanner sweeps instant (< 10ms)
+   */
+  preloadRegisteredModels() {
+    setTimeout(() => {
+      const modelKeys = Object.keys(AR_CONFIG.models || {});
+      modelKeys.forEach((key) => {
+        if (key === this.modelId) return;
+        const preset = AR_CONFIG.models[key];
+        let url;
+        if (preset?.isProcedural || ['helicopter', 'drone', 'robot', 'car'].includes(key)) {
+          url = getModelBlobUrl(key);
+        } else if (preset?.file) {
+          url = preset.file;
+        } else {
+          url = `models/${key}.glb`;
+        }
+        if (url) {
+          this.modelLoader.load(url).catch(() => {});
+        }
+      });
+    }, 2500);
   }
 
   async initCamera() {

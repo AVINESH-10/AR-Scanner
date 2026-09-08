@@ -14,6 +14,7 @@ export class ModelLoader {
     this.currentGltf = null;
     this.mixer = null;
     this.animations = [];
+    this.modelCache = new Map(); // url -> { scene, animations }
   }
 
   /**
@@ -85,21 +86,45 @@ export class ModelLoader {
   }
 
   /**
-   * Load a GLB model from URL or Blob with progress reporting
+   * Load a GLB model from URL or Blob with caching and progress reporting
    * @param {string} url - Model URL or ObjectURL
    * @param {Function} onProgress - Progress callback: (percentage, loadedMb, totalMb) => {}
    * @returns {Promise<THREE.Group>}
    */
   load(url, onProgress = () => {}) {
     return new Promise((resolve, reject) => {
+      // 1. Instant Cache Check: Instantaneous model switching for multi-scanner sweeping
+      if (this.modelCache.has(url)) {
+        const cached = this.modelCache.get(url);
+        const clonedModel = cached.scene.clone(true);
+
+        if (cached.animations && cached.animations.length > 0) {
+          this.mixer = new THREE.AnimationMixer(clonedModel);
+          this.animations = cached.animations;
+          cached.animations.forEach((clip) => {
+            const action = this.mixer.clipAction(clip);
+            action.play();
+          });
+        } else {
+          this.mixer = null;
+          this.animations = [];
+        }
+
+        this.currentModel = clonedModel;
+        onProgress(100, '', '');
+        resolve(clonedModel);
+        return;
+      }
+
+      // 2. Fetch and parse GLB asset
       this.loader.load(
         url,
         (gltf) => {
           this.currentGltf = gltf;
-          const model = gltf.scene;
+          const rawScene = gltf.scene;
 
           // Process materials, high-precision textures and shadows
-          model.traverse((child) => {
+          rawScene.traverse((child) => {
             if (child.isMesh) {
               child.castShadow = true;
               child.receiveShadow = true;
@@ -127,11 +152,17 @@ export class ModelLoader {
           });
 
           // Normalize model size and center bounding box precisely at bottom center (Y=0)
-          this.normalizeModel(model);
+          const normalizedWrapper = this.normalizeModel(rawScene);
+
+          // Store template in cache for zero-latency subsequent scans
+          this.modelCache.set(url, {
+            scene: normalizedWrapper.clone(true),
+            animations: gltf.animations || []
+          });
 
           // Setup animations if present
           if (gltf.animations && gltf.animations.length > 0) {
-            this.mixer = new THREE.AnimationMixer(model);
+            this.mixer = new THREE.AnimationMixer(normalizedWrapper);
             this.animations = gltf.animations;
             gltf.animations.forEach((clip) => {
               const action = this.mixer.clipAction(clip);
@@ -142,8 +173,8 @@ export class ModelLoader {
             this.animations = [];
           }
 
-          this.currentModel = model;
-          resolve(model);
+          this.currentModel = normalizedWrapper;
+          resolve(normalizedWrapper);
         },
         (xhr) => {
           if (xhr.lengthComputable && xhr.total > 0) {
@@ -153,7 +184,7 @@ export class ModelLoader {
             onProgress(percent, loadedMb, totalMb);
           } else {
             const loadedMb = (xhr.loaded / (1024 * 1024)).toFixed(1);
-            onProgress(50, loadedMb, null); // Fallback progress
+            onProgress(50, loadedMb, null);
           }
         },
         (error) => {
@@ -211,13 +242,21 @@ export class ModelLoader {
   }
 
   /**
-   * Dispose current model assets
+   * Stop active animation actions and unbind current model reference
    */
-  dispose() {
+  stopCurrentAnimation() {
     if (this.mixer) {
       this.mixer.stopAllAction();
       this.mixer = null;
     }
+    this.currentModel = null;
+  }
+
+  /**
+   * Dispose current model assets
+   */
+  dispose() {
+    this.stopCurrentAnimation();
     if (this.currentModel) {
       this.currentModel.traverse((child) => {
         if (child.isMesh) {
