@@ -283,7 +283,9 @@ export class ModelLoader {
    */
   update(delta) {
     if (this.mixer) {
-      this.mixer.update(delta);
+      // Clamp delta to prevent jerky animation frame jumps on brief system hitches
+      const clampedDelta = Math.min(delta, 0.05);
+      this.mixer.update(clampedDelta);
     }
   }
 

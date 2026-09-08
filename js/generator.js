@@ -606,7 +606,7 @@ export class GeneratorStudio {
 
   animate() {
     requestAnimationFrame(this.animate);
-    const delta = this.clock.getDelta();
+    const delta = Math.min(this.clock.getDelta(), 0.05);
 
     // Update animations (if any)
     this.modelLoader.update(delta);

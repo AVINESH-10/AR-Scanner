@@ -152,6 +152,7 @@ export class ArExperience {
     this.scanCanvas = document.createElement('canvas');
     this.scanContext = this.scanCanvas.getContext('2d', { willReadFrequently: true });
     this.isScanning = false;
+    this.lastScanTime = 0;
 
     // Resize listener
     window.addEventListener('resize', () => this.onResize());
@@ -534,6 +535,8 @@ export class ArExperience {
         this.statusText.textContent = 'SEARCHING FOR QR...';
         if (this.lostBanner) this.lostBanner.style.display = 'none';
         this.isTrackingActive = false;
+        this.hasTrackedPose = false;
+        this.markerGroup.visible = false;
         break;
       case 'detected':
         this.statusText.textContent = 'QR DETECTED ✓';
@@ -551,12 +554,8 @@ export class ArExperience {
         this.statusText.textContent = 'QR LOST';
         if (this.lostBanner) this.lostBanner.style.display = 'flex';
         this.isTrackingActive = false;
-        // Keep visible briefly for smoother visual continuity
-        setTimeout(() => {
-          if (!this.isTrackingActive) {
-            this.markerGroup.visible = false;
-          }
-        }, 500);
+        this.hasTrackedPose = false;
+        this.markerGroup.visible = false;
         break;
     }
   }
@@ -669,16 +668,20 @@ export class ArExperience {
   renderLoop(timestamp) {
     requestAnimationFrame(this.renderLoop);
 
-    const delta = Math.min(this.clock.getDelta(), 0.1);
+    // Precise delta time capped to prevent animation skipping
+    const delta = Math.min(this.clock.getDelta(), 0.05);
 
-    // 1. Decoupled ultra-fast CV processing (never blocks 60/120 FPS render pipeline)
-    if (!this.isScanning && this.videoElement && this.videoElement.readyState === this.videoElement.HAVE_ENOUGH_DATA) {
+    // 1. Decoupled throttled CV processing (runs at optimal ~30 scans/sec, freeing the 60/120 FPS WebGL render thread)
+    const scanInterval = this.isTrackingActive ? 33 : 60;
+    if (!this.isScanning && (timestamp - this.lastScanTime >= scanInterval) && this.videoElement && this.videoElement.readyState === this.videoElement.HAVE_ENOUGH_DATA) {
       const vw = this.videoElement.videoWidth;
       const vh = this.videoElement.videoHeight;
 
       if (vw > 0 && vh > 0) {
         this.isScanning = true;
-        const maxScanDim = AR_CONFIG.cv?.maxScanDimension || 512;
+        this.lastScanTime = timestamp;
+
+        const maxScanDim = AR_CONFIG.cv?.maxScanDimension || 384;
         let scanW, scanH;
         if (vw >= vh) {
           scanW = Math.min(vw, maxScanDim);
@@ -706,9 +709,9 @@ export class ArExperience {
       }
     }
 
-    // 2. Smooth continuous Slerp/Lerp pose interpolation (eliminates hand tremor & jitter)
+    // 2. Smooth continuous Slerp/Lerp pose interpolation (eliminates hand tremor & jitter with high responsiveness)
     if (this.isTrackingActive && this.hasTrackedPose) {
-      const lerpFactor = Math.min(1.0, 1.0 - Math.exp(-28.0 * delta));
+      const lerpFactor = Math.min(1.0, 1.0 - Math.exp(-32.0 * delta));
       this.markerGroup.position.lerp(this.targetPosition, lerpFactor);
       this.markerGroup.quaternion.slerp(this.targetQuaternion, lerpFactor);
     }

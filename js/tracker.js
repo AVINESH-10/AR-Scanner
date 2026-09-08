@@ -468,10 +468,12 @@ export class ARTracker {
 
     // Check decay timeout for tracking lost (smooth hysteresis hold)
     if (this.status === 'tracking' || this.status === 'detected') {
-      const lostTimeout = AR_CONFIG.cv?.trackingLostTimeoutMs || AR_CONFIG.trackingLostTimeoutMs || 850;
+      const lostTimeout = AR_CONFIG.cv?.trackingLostTimeoutMs || AR_CONFIG.trackingLostTimeoutMs || 380;
       if (timestamp - this.lastDetectedTime > lostTimeout) {
         this.setStatus('lost');
         this.prevSmoothedCorners = null;
+        this.posFilter.reset();
+        this.quatFilter.reset();
       }
     }
   }

@@ -21,19 +21,19 @@ export const AR_CONFIG = {
 
   // High-performance CV and Tracking configuration (eliminates lag & CPU bottleneck)
   cv: {
-    maxScanDimension: 512, // Optimal balance between crisp sub-pixel QR detection and 60/120 FPS mobile performance
-    trackingLostTimeoutMs: 950 // Smooth hysteresis hold time when marker is briefly occluded or during rapid motion
+    maxScanDimension: 384, // Optimized balance for sub-pixel QR detection and 60/120 FPS render performance
+    trackingLostTimeoutMs: 380 // Responsive lost detection: prevents model from sticking to screen while scanning
   },
 
-  // Pose filter tuning (Optimized One-Euro Filter for jitter-free tracking during minor hand shaking)
+  // Pose filter tuning (Optimized One-Euro Filter for rock-solid stability and zero-lag response)
   filter: {
-    minCutoff: 0.65,   // Ultra-stable stationary pose (eliminates micro-jitter and hand shaking)
-    beta: 0.16,        // Instantaneous dynamic response (zero lag when rotating/moving phone)
-    dCutoff: 1.2       // Derivative cutoff for filtering velocity noise
+    minCutoff: 0.80,   // Stable stationary pose (eliminates micro-jitter and hand shaking)
+    beta: 0.25,        // Instantaneous dynamic response (zero lag when moving phone)
+    dCutoff: 1.0       // Derivative cutoff for filtering velocity noise
   },
 
-  // Tracking state decay timeout (ms) before marking as lost (smooth hysteresis)
-  trackingLostTimeoutMs: 850,
+  // Tracking state decay timeout (ms) before marking as lost
+  trackingLostTimeoutMs: 380,
 
   // Maximum allowed file upload size in MB (0 - 50 MB range)
   maxUploadSizeMb: 50,
