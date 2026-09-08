@@ -391,6 +391,7 @@ export class ArExperience {
       }
 
       this.model = newModel;
+      this.modelLoader.setActiveModel(newModel);
       this.markerGroup.add(newModel);
       this.updateModelTransform();
       this.showScannerToast(modelDisplayName, "3D MODEL ACTIVE", 2500);
@@ -426,24 +427,27 @@ export class ArExperience {
    * Preload registered models in background to make multi-scanner sweeps instant (< 10ms)
    */
   preloadRegisteredModels() {
-    setTimeout(() => {
-      const modelKeys = Object.keys(AR_CONFIG.models || {});
-      modelKeys.forEach((key) => {
-        if (key === this.modelId) return;
-        const preset = AR_CONFIG.models[key];
-        let url;
-        if (preset?.isProcedural || ['helicopter', 'drone', 'robot', 'car'].includes(key)) {
-          url = getModelBlobUrl(key);
-        } else if (preset?.file) {
-          url = preset.file;
-        } else {
-          url = `models/${key}.glb`;
-        }
-        if (url) {
-          this.modelLoader.load(url).catch(() => {});
-        }
-      });
-    }, 2500);
+    // Stagger model preloads gracefully in background so mobile CPU and memory stay cool
+    const modelKeys = Object.keys(AR_CONFIG.models || {}).filter((k) => k !== this.modelId);
+    let index = 0;
+    const preloadNext = () => {
+      if (index >= modelKeys.length) return;
+      const key = modelKeys[index++];
+      const preset = AR_CONFIG.models[key];
+      let url;
+      if (preset?.isProcedural || ['helicopter', 'drone', 'robot', 'car'].includes(key)) {
+        url = getModelBlobUrl(key);
+      } else if (preset?.file) {
+        url = preset.file;
+      } else {
+        url = `models/${key}.glb`;
+      }
+      if (url) {
+        this.modelLoader.load(url, () => {}, true).catch(() => {});
+      }
+      setTimeout(preloadNext, 2500);
+    };
+    setTimeout(preloadNext, 3500);
   }
 
   async initCamera() {
@@ -460,9 +464,9 @@ export class ArExperience {
       audio: false,
       video: {
         facingMode: { ideal: 'environment' },
-        width: { ideal: AR_CONFIG.camera?.idealWidth || 1920, min: AR_CONFIG.camera?.minWidth || 1280 },
-        height: { ideal: AR_CONFIG.camera?.idealHeight || 1080, min: AR_CONFIG.camera?.minHeight || 720 },
-        frameRate: { ideal: AR_CONFIG.camera?.frameRate || 60, min: 30 }
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 60, min: 30 }
       }
     };
 
@@ -508,6 +512,7 @@ export class ArExperience {
       });
 
       this.model = model;
+      this.modelLoader.setActiveModel(model);
       this.markerGroup.add(model);
       this.updateModelTransform();
       this.showLoading(false);
@@ -672,7 +677,7 @@ export class ArExperience {
     const delta = Math.min(this.clock.getDelta(), 0.05);
 
     // 1. Decoupled throttled CV processing (runs at optimal ~30 scans/sec, freeing the 60/120 FPS WebGL render thread)
-    const scanInterval = this.isTrackingActive ? 33 : 60;
+    const scanInterval = this.isTrackingActive ? 30 : 50;
     if (!this.isScanning && (timestamp - this.lastScanTime >= scanInterval) && this.videoElement && this.videoElement.readyState === this.videoElement.HAVE_ENOUGH_DATA) {
       const vw = this.videoElement.videoWidth;
       const vh = this.videoElement.videoHeight;
@@ -681,15 +686,12 @@ export class ArExperience {
         this.isScanning = true;
         this.lastScanTime = timestamp;
 
-        const maxScanDim = AR_CONFIG.cv?.maxScanDimension || 384;
-        let scanW, scanH;
-        if (vw >= vh) {
-          scanW = Math.min(vw, maxScanDim);
-          scanH = Math.round(scanW * (vh / vw));
-        } else {
-          scanH = Math.min(vh, maxScanDim);
-          scanW = Math.round(scanH * (vw / vh));
-        }
+        // Ensure minimum dimension is at least 480px so QR modules remain sharp on mobile cameras
+        const minDim = Math.min(vw, vh);
+        const targetMin = Math.min(minDim, 480);
+        const scanScale = targetMin / minDim;
+        const scanW = Math.round(vw * scanScale);
+        const scanH = Math.round(vh * scanScale);
 
         if (this.scanCanvas.width !== scanW || this.scanCanvas.height !== scanH) {
           this.scanCanvas.width = scanW;
@@ -711,7 +713,7 @@ export class ArExperience {
 
     // 2. Smooth continuous Slerp/Lerp pose interpolation (eliminates hand tremor & jitter with high responsiveness)
     if (this.isTrackingActive && this.hasTrackedPose) {
-      const lerpFactor = Math.min(1.0, 1.0 - Math.exp(-32.0 * delta));
+      const lerpFactor = Math.min(1.0, 1.0 - Math.exp(-28.0 * delta));
       this.markerGroup.position.lerp(this.targetPosition, lerpFactor);
       this.markerGroup.quaternion.slerp(this.targetQuaternion, lerpFactor);
     }

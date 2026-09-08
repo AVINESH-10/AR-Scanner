@@ -6,17 +6,23 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 
 export class ModelLoader {
   constructor() {
     this.loader = new GLTFLoader();
     this.currentModel = null;
     this.currentGltf = null;
-    this.mixer = null;
-    this.animations = [];
+    this.activeMixer = null;
     this.activeActions = [];
-    this.modelCache = new Map(); // url -> { rawScene, gltf, animations }
+    this.modelCache = new Map(); // url -> { model, mixer, actions }
+  }
+
+  get mixer() {
+    return this.activeMixer;
+  }
+
+  set mixer(m) {
+    this.activeMixer = m;
   }
 
   /**
@@ -91,32 +97,26 @@ export class ModelLoader {
    * Setup animation mixer and playback actions on target 3D model
    * @param {THREE.Object3D} targetModel - Model root hierarchy
    * @param {Array<THREE.AnimationClip>} animations - Animation clips
+   * @returns {{ mixer: THREE.AnimationMixer|null, actions: Array<THREE.AnimationAction> }}
    */
   setupAnimations(targetModel, animations) {
-    if (this.mixer) {
-      this.mixer.stopAllAction();
-      this.mixer.uncacheRoot(this.mixer.getRoot());
-      this.mixer = null;
-    }
-    this.activeActions = [];
-    this.animations = animations || [];
-
     if (!targetModel || !animations || animations.length === 0) {
-      return;
+      return { mixer: null, actions: [] };
     }
 
-    this.mixer = new THREE.AnimationMixer(targetModel);
+    const mixer = new THREE.AnimationMixer(targetModel);
+    const actions = [];
 
     // Play primary animation (or all non-conflicting animation clips)
     const primaryClip = animations[0];
-    const primaryAction = this.mixer.clipAction(primaryClip);
+    const primaryAction = mixer.clipAction(primaryClip);
     primaryAction.reset();
     primaryAction.setEffectiveTimeScale(1.0);
     primaryAction.setEffectiveWeight(1.0);
     primaryAction.setLoop(THREE.LoopRepeat, Infinity);
     primaryAction.clampWhenFinished = false;
     primaryAction.play();
-    this.activeActions.push(primaryAction);
+    actions.push(primaryAction);
 
     // If there are other clips that do not conflict, play them as well
     for (let i = 1; i < animations.length; i++) {
@@ -129,15 +129,36 @@ export class ModelLoader {
                          (primaryName.includes('run') && nameLower.includes('idle')) ||
                          (primaryName.includes('walk') && nameLower.includes('idle'));
       if (!isConflict) {
-        const action = this.mixer.clipAction(clip);
+        const action = mixer.clipAction(clip);
         action.reset();
         action.setEffectiveTimeScale(1.0);
         action.setEffectiveWeight(1.0);
         action.setLoop(THREE.LoopRepeat, Infinity);
         action.clampWhenFinished = false;
         action.play();
-        this.activeActions.push(action);
+        actions.push(action);
       }
+    }
+
+    return { mixer, actions };
+  }
+
+  /**
+   * Activate target 3D model and resume its animation playback
+   * @param {THREE.Group} model - Normalized ModelWrapper
+   */
+  setActiveModel(model) {
+    this.currentModel = model;
+    if (model && model.userData) {
+      this.activeMixer = model.userData.mixer || null;
+      this.activeActions = model.userData.actions || [];
+      this.activeActions.forEach((action) => {
+        action.paused = false;
+        action.play();
+      });
+    } else {
+      this.activeMixer = null;
+      this.activeActions = [];
     }
   }
 
@@ -145,27 +166,19 @@ export class ModelLoader {
    * Load a GLB model from URL or Blob with caching, animation binding, and progress reporting
    * @param {string} url - Model URL or ObjectURL
    * @param {Function} onProgress - Progress callback: (percentage, loadedMb, totalMb) => {}
+   * @param {boolean} isPreload - If true, caches model without hijacking active mixer
    * @returns {Promise<THREE.Group>}
    */
-  load(url, onProgress = () => {}) {
+  load(url, onProgress = () => {}, isPreload = false) {
     return new Promise((resolve, reject) => {
       // 1. Instant Cache Check: Instantaneous model switching for multi-scanner sweeping
       if (this.modelCache.has(url)) {
         const cached = this.modelCache.get(url);
-        // Use SkeletonUtils to cleanly clone skinned meshes, bones, and hierarchies
-        const clonedScene = (SkeletonUtils && typeof SkeletonUtils.clone === 'function')
-          ? SkeletonUtils.clone(cached.rawScene)
-          : cached.rawScene.clone(true);
-
-        // Normalize wrapper for the cloned model
-        const normalizedWrapper = this.normalizeModel(clonedScene);
-
-        // Bind animation mixer to the cloned scene hierarchy
-        this.setupAnimations(clonedScene, cached.animations);
-
-        this.currentModel = normalizedWrapper;
+        if (!isPreload) {
+          this.setActiveModel(cached.model);
+        }
         onProgress(100, '', '');
-        resolve(normalizedWrapper);
+        resolve(cached.model);
         return;
       }
 
@@ -206,23 +219,25 @@ export class ModelLoader {
             }
           });
 
-          // Store pristine template in cache for zero-latency subsequent scans
+          // Normalize model directly around rawScene without destructive cloning
+          const normalizedWrapper = this.normalizeModel(rawScene);
+
+          // Setup animation playback directly on rawScene
+          const { mixer, actions } = this.setupAnimations(rawScene, gltf.animations || []);
+          normalizedWrapper.userData.mixer = mixer;
+          normalizedWrapper.userData.actions = actions;
+
+          // Store pristine model in cache for zero-latency subsequent scans
           this.modelCache.set(url, {
-            rawScene: rawScene,
-            animations: gltf.animations || []
+            model: normalizedWrapper,
+            mixer,
+            actions
           });
 
-          // Clone from template for active display
-          const clonedScene = (SkeletonUtils && typeof SkeletonUtils.clone === 'function')
-            ? SkeletonUtils.clone(rawScene)
-            : rawScene.clone(true);
+          if (!isPreload) {
+            this.setActiveModel(normalizedWrapper);
+          }
 
-          const normalizedWrapper = this.normalizeModel(clonedScene);
-
-          // Setup animation playback
-          this.setupAnimations(clonedScene, gltf.animations || []);
-
-          this.currentModel = normalizedWrapper;
           resolve(normalizedWrapper);
         },
         (xhr) => {
@@ -282,10 +297,10 @@ export class ModelLoader {
    * @param {number} delta - Delta time in seconds
    */
   update(delta) {
-    if (this.mixer) {
+    if (this.activeMixer) {
       // Clamp delta to prevent jerky animation frame jumps on brief system hitches
       const clampedDelta = Math.min(delta, 0.05);
-      this.mixer.update(clampedDelta);
+      this.activeMixer.update(clampedDelta);
     }
   }
 
@@ -293,9 +308,9 @@ export class ModelLoader {
    * Stop active animation actions and unbind current model reference
    */
   stopCurrentAnimation() {
-    if (this.mixer) {
-      this.mixer.stopAllAction();
-      this.mixer = null;
+    if (this.activeMixer) {
+      this.activeMixer.stopAllAction();
+      this.activeMixer = null;
     }
     this.activeActions = [];
     this.currentModel = null;
