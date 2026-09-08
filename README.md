@@ -84,12 +84,12 @@ To test on a physical smartphone on your local Wi-Fi:
 
 Your WebAR application is hosted live at:
 ```text
-https://nithish-cmd-afk.github.io/AR-overview/
+https://avinesh-10.github.io/AR-Scanner/
 ```
 
-- **Landing Page**: `https://nithish-cmd-afk.github.io/AR-overview/`
-- **AR Generator Studio**: `https://nithish-cmd-afk.github.io/AR-overview/generator.html`
-- **AR Camera Viewer**: `https://nithish-cmd-afk.github.io/AR-overview/ar.html?id=helicopter`
+- **Landing Page**: `https://avinesh-10.github.io/AR-Scanner/`
+- **AR Generator Studio**: `https://avinesh-10.github.io/AR-Scanner/generator.html`
+- **AR Camera Viewer**: `https://avinesh-10.github.io/AR-Scanner/ar.html?id=helicopter`
 
 ---
 

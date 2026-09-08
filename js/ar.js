@@ -230,7 +230,7 @@ export class ArExperience {
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
         this.showError("No camera device detected on your mobile device.");
       } else if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-        this.showError("Mobile browsers require HTTPS for camera access. Please open the live GitHub Pages link: https://nithish-cmd-afk.github.io/AR-overview/ar.html");
+        this.showError("Mobile browsers require HTTPS for camera access. Please open the live GitHub Pages link: https://avinesh-10.github.io/AR-Scanner/ar.html");
       } else {
         this.showError(`Unable to start camera: ${err.message || 'Unknown error'}`);
       }
