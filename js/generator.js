@@ -134,6 +134,9 @@ export class GeneratorStudio {
 
     // Handle resize
     window.addEventListener('resize', () => this.onResize());
+    if (window.ResizeObserver && this.container) {
+      new ResizeObserver(() => this.onResize()).observe(this.container);
+    }
 
     // Start render loop
     this.animate = this.animate.bind(this);
