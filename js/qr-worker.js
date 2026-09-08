@@ -27,9 +27,42 @@ self.onmessage = function(e) {
   }
 
   const clampedData = new Uint8ClampedArray(data);
-  const code = self.jsQR(clampedData, width, height, {
+
+  // Pass 1: Standard detection (ultra-fast)
+  let code = self.jsQR(clampedData, width, height, {
     inversionAttempts: inversionAttempts
   });
+
+  // Pass 2: Inverted / High contrast attempt (essential for screen glare & dark backgrounds)
+  if (!code && inversionAttempts === 'dontInvert') {
+    code = self.jsQR(clampedData, width, height, {
+      inversionAttempts: 'attemptBoth'
+    });
+  }
+
+  // Pass 3: Adaptive Contrast Enhancement for oblique camera angles and uneven lighting
+  if (!code && width <= 360 && height <= 360) {
+    const len = clampedData.length;
+    let minL = 255, maxL = 0;
+    // Fast step-sampling of luminance to determine dynamic range
+    for (let i = 0; i < len; i += 16) {
+      const lum = (clampedData[i] * 77 + clampedData[i + 1] * 150 + clampedData[i + 2] * 29) >> 8;
+      if (lum < minL) minL = lum;
+      if (lum > maxL) maxL = lum;
+    }
+    const range = maxL - minL;
+    if (range > 15 && range < 225) {
+      const enhanced = new Uint8ClampedArray(len);
+      const scale = 255.0 / range;
+      for (let i = 0; i < len; i += 4) {
+        enhanced[i]     = Math.min(255, Math.max(0, ((clampedData[i]     - minL) * scale)));
+        enhanced[i + 1] = Math.min(255, Math.max(0, ((clampedData[i + 1] - minL) * scale)));
+        enhanced[i + 2] = Math.min(255, Math.max(0, ((clampedData[i + 2] - minL) * scale)));
+        enhanced[i + 3] = 255;
+      }
+      code = self.jsQR(enhanced, width, height, { inversionAttempts: 'dontInvert' });
+    }
+  }
 
   if (code && code.location) {
     const ox = roiOffset ? roiOffset.x : 0;
@@ -71,3 +104,4 @@ self.onmessage = function(e) {
     });
   }
 };
+

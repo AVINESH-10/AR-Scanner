@@ -84,45 +84,61 @@ class Vector3Filter {
 }
 
 /**
- * Filter Quaternion using Slerp-based OneEuroFilter
+ * Geodesic Slerp-based Quaternion Filter on SO(3)
+ * Eliminates orientation distortion, tilt wobble, and gimbal jitter at all camera angles
  */
 class QuaternionFilter {
-  constructor(minCutoff = 1.0, beta = 0.05) {
-    this.fqx = new OneEuroFilter(60, minCutoff, beta);
-    this.fqy = new OneEuroFilter(60, minCutoff, beta);
-    this.fqz = new OneEuroFilter(60, minCutoff, beta);
-    this.fqw = new OneEuroFilter(60, minCutoff, beta);
+  constructor(minCutoff = 0.50, beta = 0.15) {
+    this.minCutoff = minCutoff;
+    this.beta = beta;
     this.prevQuat = new THREE.Quaternion();
     this.initialized = false;
+    this.tPrev = null;
+    this.angularVelocity = 0;
   }
 
   filter(quat, time) {
+    if (!this.initialized || !this.tPrev) {
+      this.prevQuat.copy(quat).normalize();
+      this.initialized = true;
+      this.tPrev = time;
+      return this.prevQuat.clone();
+    }
+
+    const dt = Math.max(0.001, (time - this.tPrev) / 1000.0);
+    this.tPrev = time;
+
     // Ensure shortest path in quaternion space
-    let target = quat.clone();
-    if (this.initialized && this.prevQuat.dot(target) < 0) {
+    let target = quat.clone().normalize();
+    let dot = this.prevQuat.dot(target);
+    if (dot < 0) {
       target.x = -target.x;
       target.y = -target.y;
       target.z = -target.z;
       target.w = -target.w;
+      dot = -dot;
     }
 
-    const qx = this.fqx.filter(target.x, time);
-    const qy = this.fqy.filter(target.y, time);
-    const qz = this.fqz.filter(target.z, time);
-    const qw = this.fqw.filter(target.w, time);
+    // Geodesic angular distance on 3D sphere
+    dot = Math.min(1.0, Math.max(-1.0, dot));
+    const angle = 2.0 * Math.acos(dot); // radians
+    const instantaneousVelocity = angle / dt; // rad/s
 
-    const res = new THREE.Quaternion(qx, qy, qz, qw).normalize();
-    this.prevQuat.copy(res);
-    this.initialized = true;
-    return res;
+    // Low-pass filtered angular velocity
+    this.angularVelocity = 0.8 * this.angularVelocity + 0.2 * instantaneousVelocity;
+
+    // Adaptive cutoff: when camera is still/shaking gently -> strong damping; when moving -> zero lag
+    const cutoff = this.minCutoff + this.beta * this.angularVelocity;
+    const alpha = Math.min(1.0, Math.max(0.08, 1.0 - Math.exp(-cutoff * dt * 2.0 * Math.PI)));
+
+    this.prevQuat.slerp(target, alpha).normalize();
+    return this.prevQuat.clone();
   }
 
   reset() {
-    this.fqx.reset();
-    this.fqy.reset();
-    this.fqz.reset();
-    this.fqw.reset();
     this.initialized = false;
+    this.tPrev = null;
+    this.angularVelocity = 0;
   }
 }
 
@@ -133,6 +149,9 @@ const _h3 = new THREE.Vector3();
 const _r1Raw = new THREE.Vector3();
 const _r2Raw = new THREE.Vector3();
 const _tRaw = new THREE.Vector3();
+const _v1 = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
 const _rawPos = new THREE.Vector3();
 const _mat4 = new THREE.Matrix4();
 const _rotX = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
@@ -206,18 +225,11 @@ export class ARTracker {
       const dy = cur.y - prev.y;
       const dist = Math.hypot(dx, dy);
 
-      // Adaptive dual-zone smoothing:
-      // Micro hand tremor (< 2px): heavy low-pass filtering (alpha ~0.10) for rock-solid stability
-      // Moving (< 6px): smooth responsive tracking
-      // Rapid sweep (> 6px): near-instant response (alpha ~0.95) with zero lag
-      let alpha;
-      if (dist < 1.8) {
-        alpha = 0.10;
-      } else if (dist < 6.0) {
-        alpha = 0.10 + 0.65 * ((dist - 1.8) / 4.2);
-      } else {
-        alpha = Math.min(0.98, 0.75 + 0.23 * (1.0 - Math.exp(-(dist - 6.0) / 6.0)));
-      }
+      // Continuous exponential sigmoid smoothing:
+      // Stationary / micro-shake (< 1.5px): alpha ~ 0.12 (rock-solid hold, no tremor)
+      // Natural motion (2px - 6px): smooth responsive tracking
+      // Fast camera motion (> 8px): near-instant alpha ~ 0.95 (zero lag)
+      const alpha = Math.min(0.98, Math.max(0.12, 1.0 - Math.exp(-dist / 3.2)));
 
       smoothed[key] = {
         x: prev.x + dx * alpha,
@@ -307,15 +319,15 @@ export class ARTracker {
    * Gram-Schmidt Orthonormalization for 3x3 rotation matrix to ensure strict SO(3)
    */
   orthonormalize(r1, r2) {
-    const v1 = new THREE.Vector3(r1.x, r1.y, r1.z).normalize();
-    const dot = r2.dot(v1);
-    const v2 = new THREE.Vector3(r2.x - dot * v1.x, r2.y - dot * v1.y, r2.z - dot * v1.z).normalize();
-    const v3 = new THREE.Vector3().crossVectors(v1, v2).normalize();
+    _v1.set(r1.x, r1.y, r1.z).normalize();
+    const dot = r2.dot(_v1);
+    _v2.set(r2.x - dot * _v1.x, r2.y - dot * _v1.y, r2.z - dot * _v1.z).normalize();
+    _v3.crossVectors(_v1, _v2).normalize();
 
     // Re-verify orthogonality
-    v2.crossVectors(v3, v1).normalize();
+    _v2.crossVectors(_v3, _v1).normalize();
 
-    return { v1, v2, v3 };
+    return { v1: _v1, v2: _v2, v3: _v3 };
   }
 
   /**
@@ -450,7 +462,7 @@ export class ARTracker {
    */
   checkDecayTimeout(timestamp = performance.now()) {
     if (this.status === 'tracking' || this.status === 'detected') {
-      const lostTimeout = AR_CONFIG.cv?.trackingLostTimeoutMs || AR_CONFIG.trackingLostTimeoutMs || 750;
+      const lostTimeout = AR_CONFIG.cv?.trackingLostTimeoutMs || AR_CONFIG.trackingLostTimeoutMs || 1500;
       if (timestamp - this.lastDetectedTime > lostTimeout) {
         this.setStatus('lost');
         this.prevSmoothedCorners = null;

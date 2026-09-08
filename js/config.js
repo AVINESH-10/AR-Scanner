@@ -21,20 +21,20 @@ export const AR_CONFIG = {
 
   // High-performance CV and Tracking configuration (optimized for mobile camera detection)
   cv: {
-    targetMinDimension: 360, // 360px optimal balance: razor-sharp QR decoding with 4x faster throughput
-    roiScanDimension: 220,   // Ultra-fast 220px Region-of-Interest scan during active tracking (~2ms)
-    trackingLostTimeoutMs: 750 // 750ms smooth hysteresis: holds through hand shakes/blurs without flickering
+    targetMinDimension: 384, // 384px optimal balance: razor-sharp QR decoding with 4x faster throughput
+    roiScanDimension: 280,   // High-resolution 280px Region-of-Interest scan for steep camera angles (~3ms)
+    trackingLostTimeoutMs: 1500 // 1500ms smooth hysteresis: holds through hand shakes/blurs without flickering
   },
 
   // Pose filter tuning (Optimized One-Euro Filter for rock-solid stability and zero-lag response)
   filter: {
-    minCutoff: 0.70,   // Stable stationary pose (eliminates micro-jitter and hand shaking)
-    beta: 0.20,        // Instantaneous dynamic response (zero lag when moving phone)
+    minCutoff: 0.50,   // Stable stationary pose (eliminates micro-jitter and hand shaking in front view)
+    beta: 0.15,        // Instantaneous dynamic response (zero lag when moving phone)
     dCutoff: 1.0       // Derivative cutoff for filtering velocity noise
   },
 
-  // Tracking state decay timeout (ms) before marking as lost
-  trackingLostTimeoutMs: 750,
+  // Tracking state decay timeout (ms) before marking as lost (prevents model loss during hand shake)
+  trackingLostTimeoutMs: 1500,
 
   // Maximum allowed file upload size in MB (0 - 50 MB range)
   maxUploadSizeMb: 50,

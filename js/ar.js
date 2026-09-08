@@ -192,6 +192,13 @@ export class ArExperience {
 
   handleWorkerMessage(msg) {
     this.workerBusy = false;
+    if (msg.found) {
+      this.roiMissCount = 0;
+      this.forceFullScan = false;
+    } else if (msg.wasRoi) {
+      // Immediate recovery: if an ROI scan missed, force a full-frame scan on the very next frame!
+      this.forceFullScan = true;
+    }
     if (this.tracker) {
       this.tracker.processWorkerResult(msg);
     }
@@ -588,23 +595,32 @@ export class ArExperience {
         this.markerGroup.visible = false;
         break;
       case 'detected':
-        this.statusText.textContent = 'QR DETECTED ✓';
-        if (this.lostBanner) this.lostBanner.style.display = 'none';
-        this.isTrackingActive = true;
-        this.markerGroup.visible = true;
-        break;
       case 'tracking':
-        this.statusText.textContent = 'TRACKING ACTIVE ✓';
+        if (this.lostGraceTimer) {
+          clearTimeout(this.lostGraceTimer);
+          this.lostGraceTimer = null;
+        }
+        this.statusText.textContent = status === 'detected' ? 'QR DETECTED ✓' : 'TRACKING ACTIVE ✓';
         if (this.lostBanner) this.lostBanner.style.display = 'none';
         this.isTrackingActive = true;
         this.markerGroup.visible = true;
         break;
       case 'lost':
-        this.statusText.textContent = 'QR LOST';
-        if (this.lostBanner) this.lostBanner.style.display = 'flex';
-        this.isTrackingActive = false;
-        this.hasTrackedPose = false;
-        this.markerGroup.visible = false;
+        this.statusText.textContent = 'RE-ACQUIRING QR...';
+        // Grace period: hold 3D model in place during camera shaking or sudden angle tilts
+        // Only hide if marker remains undetected for more than 1.5 seconds
+        if (!this.lostGraceTimer) {
+          this.lostGraceTimer = setTimeout(() => {
+            if (this.tracker && this.tracker.status === 'lost') {
+              this.statusText.textContent = 'QR LOST';
+              if (this.lostBanner) this.lostBanner.style.display = 'flex';
+              this.isTrackingActive = false;
+              this.hasTrackedPose = false;
+              this.markerGroup.visible = false;
+            }
+            this.lostGraceTimer = null;
+          }, 1500);
+        }
         break;
     }
   }
@@ -721,7 +737,7 @@ export class ArExperience {
     const delta = Math.min(this.clock.getDelta(), 0.05);
 
     // 1. Off-thread Web Worker CV scanning with Region-of-Interest (ROI) micro-scanning
-    const scanInterval = this.isTrackingActive ? 40 : 60;
+    const scanInterval = this.isTrackingActive ? (this.isWorkerReady ? 25 : 45) : (this.isWorkerReady ? 35 : 60);
     const canScanWorker = this.isWorkerReady && !this.workerBusy;
     const canScanSync = !this.isWorkerReady && !this.isScanning;
 
@@ -731,12 +747,17 @@ export class ArExperience {
 
       if (vw > 0 && vh > 0) {
         this.lastScanTime = timestamp;
+        this.scanCount = (this.scanCount || 0) + 1;
 
         let scanW, scanH, scaleX, scaleY, roiOffset = null;
         const lastCorners = this.tracker?.rawCorners;
 
+        // Periodic anchor scan every 6th frame during active tracking ensures zero drift
+        const isAnchorScan = (this.scanCount % 6 === 0);
+        const canUseRoi = this.isTrackingActive && lastCorners && lastCorners.topLeft && !this.forceFullScan && !isAnchorScan;
+
         // Active tracking: perform ultra-fast Region-of-Interest (ROI) micro-scan (~2ms)
-        if (this.isTrackingActive && lastCorners && lastCorners.topLeft) {
+        if (canUseRoi) {
           const minX = Math.min(lastCorners.topLeft.x, lastCorners.topRight.x, lastCorners.bottomRight.x, lastCorners.bottomLeft.x);
           const maxX = Math.max(lastCorners.topLeft.x, lastCorners.topRight.x, lastCorners.bottomRight.x, lastCorners.bottomLeft.x);
           const minY = Math.min(lastCorners.topLeft.y, lastCorners.topRight.y, lastCorners.bottomRight.y, lastCorners.bottomLeft.y);
@@ -744,18 +765,19 @@ export class ArExperience {
 
           const bw = maxX - minX;
           const bh = maxY - minY;
-          const marginX = bw * 0.45;
-          const marginY = bh * 0.45;
+          // Ample 75% margin ensures the marker never escapes the bounding box during quick pans/tilts
+          const marginX = bw * 0.75;
+          const marginY = bh * 0.75;
 
           const rx = Math.max(0, Math.floor(minX - marginX));
           const ry = Math.max(0, Math.floor(minY - marginY));
           const rw = Math.min(vw - rx, Math.ceil(bw + marginX * 2));
           const rh = Math.min(vh - ry, Math.ceil(bh + marginY * 2));
 
-          const targetRoiDim = AR_CONFIG.cv?.roiScanDimension || 220;
+          const targetRoiDim = AR_CONFIG.cv?.roiScanDimension || 280;
           const roiScale = Math.min(1.0, targetRoiDim / Math.max(rw, rh));
-          scanW = Math.max(80, Math.round(rw * roiScale));
-          scanH = Math.max(80, Math.round(rh * roiScale));
+          scanW = Math.max(100, Math.round(rw * roiScale));
+          scanH = Math.max(100, Math.round(rh * roiScale));
 
           if (this.scanCanvas.width !== scanW || this.scanCanvas.height !== scanH) {
             this.scanCanvas.width = scanW;
@@ -767,9 +789,9 @@ export class ArExperience {
           scaleY = rh / scanH;
           roiOffset = { x: rx, y: ry };
         } else {
-          // Searching / lost: full-frame scan optimized to 360px short dimension
+          // Searching / lost / recovery: full-frame scan optimized to 384px
           const minDim = Math.min(vw, vh);
-          const targetMin = AR_CONFIG.cv?.targetMinDimension || 360;
+          const targetMin = AR_CONFIG.cv?.targetMinDimension || 384;
           const scanScale = Math.min(1.0, targetMin / minDim);
           scanW = Math.round(vw * scanScale);
           scanH = Math.round(vh * scanScale);
@@ -782,6 +804,7 @@ export class ArExperience {
           this.scanContext.drawImage(this.videoElement, 0, 0, scanW, scanH);
           scaleX = vw / scanW;
           scaleY = vh / scanH;
+          this.forceFullScan = false;
         }
 
         const imageData = this.scanContext.getImageData(0, 0, scanW, scanH);
