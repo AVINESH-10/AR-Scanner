@@ -9,6 +9,9 @@ This directory stores `.glb` and `.gltf` 3D model files (supports files from **0
 - `spider.glb` (3.0 MB) - Articulated 3D spider model
 - `the_amazing_spiderman.glb` (0.8 MB) - 3D character asset
 - `earth.glb` (0.6 MB) - Planet Earth globe
+- `animated_butterfly.glb` - Animated 3D butterfly with flapping wings
+- `blue_butterfly.glb` - Realistic blue butterfly model
+- `spooky_skeleton_dance_2.glb` - Animated dancing skeleton character
 
 ## 📦 How to Add New 3D Models (0 – 50 MB)
 

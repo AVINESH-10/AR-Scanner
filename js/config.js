@@ -175,6 +175,42 @@ export const AR_CONFIG = {
       rotationY: 0,
       autoRotate: false,
       description: "Architectural modern tower house design with realistic exterior facade."
+    },
+    animated_butterfly: {
+      name: "Animated Butterfly",
+      category: "Creatures",
+      file: "models/animated_butterfly.glb",
+      scale: 0.70,
+      height: 0.10,
+      offsetX: 0.0,
+      offsetZ: 0.0,
+      rotationY: 0,
+      autoRotate: false,
+      description: "Graceful animated 3D butterfly with flapping wings and detailed textures."
+    },
+    blue_butterfly: {
+      name: "Blue Butterfly",
+      category: "Nature",
+      file: "models/blue_butterfly.glb",
+      scale: 0.70,
+      height: 0.10,
+      offsetX: 0.0,
+      offsetZ: 0.0,
+      rotationY: 0,
+      autoRotate: false,
+      description: "Vibrant blue butterfly model with realistic iridescent wings."
+    },
+    spooky_skeleton_dance_2: {
+      name: "Spooky Skeleton Dance",
+      category: "Animations",
+      file: "models/spooky_skeleton_dance_2.glb",
+      scale: 0.70,
+      height: 0.05,
+      offsetX: 0.0,
+      offsetZ: 0.0,
+      rotationY: 0,
+      autoRotate: false,
+      description: "Animated dancing skeleton character with dynamic bone movements."
     }
   },
 
