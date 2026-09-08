@@ -19,17 +19,17 @@ export const AR_CONFIG = {
     frameRate: 60
   },
 
-  // High-performance CV and Tracking configuration
+  // High-performance CV and Tracking configuration (eliminates lag & CPU bottleneck)
   cv: {
-    maxScanDimension: 720, // Crisp resolution for instantaneous and reliable QR detection from any distance
-    trackingLostTimeoutMs: 1200 // Smooth hysteresis hold time when marker is briefly occluded
+    maxScanDimension: 512, // Optimal balance between crisp sub-pixel QR detection and 60/120 FPS mobile performance
+    trackingLostTimeoutMs: 950 // Smooth hysteresis hold time when marker is briefly occluded or during rapid motion
   },
 
-  // Pose filter tuning (Optimized One-Euro Filter for rapid 360 navigation with zero jitter)
+  // Pose filter tuning (Optimized One-Euro Filter for jitter-free tracking during minor hand shaking)
   filter: {
-    minCutoff: 0.9,    // Ultra-stable stationary pose (eliminates micro-jitter)
-    beta: 0.22,        // Instantaneous dynamic response (zero lag when rapidly orbiting around QR)
-    dCutoff: 1.0       // Derivative cutoff for filtering velocity noise
+    minCutoff: 0.65,   // Ultra-stable stationary pose (eliminates micro-jitter and hand shaking)
+    beta: 0.16,        // Instantaneous dynamic response (zero lag when rotating/moving phone)
+    dCutoff: 1.2       // Derivative cutoff for filtering velocity noise
   },
 
   // Tracking state decay timeout (ms) before marking as lost (smooth hysteresis)

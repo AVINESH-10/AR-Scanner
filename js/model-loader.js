@@ -6,6 +6,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 
 export class ModelLoader {
   constructor() {
@@ -14,6 +15,7 @@ export class ModelLoader {
     this.currentGltf = null;
     this.mixer = null;
     this.animations = [];
+    this.activeActions = [];
     this.modelCache = new Map(); // url -> { scene, animations }
   }
 
@@ -86,7 +88,7 @@ export class ModelLoader {
   }
 
   /**
-   * Load a GLB model from URL or Blob with caching and progress reporting
+   * Load a GLB model from URL or Blob with caching, animation binding, and progress reporting
    * @param {string} url - Model URL or ObjectURL
    * @param {Function} onProgress - Progress callback: (percentage, loadedMb, totalMb) => {}
    * @returns {Promise<THREE.Group>}
@@ -96,18 +98,25 @@ export class ModelLoader {
       // 1. Instant Cache Check: Instantaneous model switching for multi-scanner sweeping
       if (this.modelCache.has(url)) {
         const cached = this.modelCache.get(url);
-        const clonedModel = cached.scene.clone(true);
+        // Use SkeletonUtils to cleanly clone skinned meshes, bones, and hierarchies
+        const clonedModel = SkeletonUtils.clone ? SkeletonUtils.clone(cached.scene) : cached.scene.clone(true);
 
         if (cached.animations && cached.animations.length > 0) {
           this.mixer = new THREE.AnimationMixer(clonedModel);
           this.animations = cached.animations;
+          this.activeActions = [];
           cached.animations.forEach((clip) => {
             const action = this.mixer.clipAction(clip);
+            action.reset();
+            action.setLoop(THREE.LoopRepeat, Infinity);
+            action.clampWhenFinished = false;
             action.play();
+            this.activeActions.push(action);
           });
         } else {
           this.mixer = null;
           this.animations = [];
+          this.activeActions = [];
         }
 
         this.currentModel = clonedModel;
@@ -160,17 +169,23 @@ export class ModelLoader {
             animations: gltf.animations || []
           });
 
-          // Setup animations if present
+          // Setup animation playback for all animation tracks
           if (gltf.animations && gltf.animations.length > 0) {
             this.mixer = new THREE.AnimationMixer(normalizedWrapper);
             this.animations = gltf.animations;
+            this.activeActions = [];
             gltf.animations.forEach((clip) => {
               const action = this.mixer.clipAction(clip);
+              action.reset();
+              action.setLoop(THREE.LoopRepeat, Infinity);
+              action.clampWhenFinished = false;
               action.play();
+              this.activeActions.push(action);
             });
           } else {
             this.mixer = null;
             this.animations = [];
+            this.activeActions = [];
           }
 
           this.currentModel = normalizedWrapper;

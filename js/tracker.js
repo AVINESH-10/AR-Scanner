@@ -171,7 +171,7 @@ export class ARTracker {
 
   /**
    * Subpixel corner stabilization with continuous adaptive smoothing
-   * Eliminates pixel discretization noise without any threshold step-stutters
+   * Eliminates pixel discretization noise, hand-shaking jitter and micro-tremor without lag
    */
   stabilizeCorners(corners) {
     if (!this.prevSmoothedCorners) {
@@ -194,8 +194,18 @@ export class ARTracker {
       const dy = cur.y - prev.y;
       const dist = Math.hypot(dx, dy);
 
-      // Continuous adaptive blend: 0.25 for micro-vibrations, ramping up to 0.95 for rapid sweeps
-      const alpha = Math.min(0.98, 0.25 + 0.73 * (1.0 - Math.exp(-dist / 3.5)));
+      // Adaptive dual-zone smoothing:
+      // Micro hand tremor (< 2px): heavy low-pass filtering (alpha ~0.10) for rock-solid stability
+      // Moving (< 6px): smooth responsive tracking
+      // Rapid sweep (> 6px): near-instant response (alpha ~0.95) with zero lag
+      let alpha;
+      if (dist < 1.8) {
+        alpha = 0.10;
+      } else if (dist < 6.0) {
+        alpha = 0.10 + 0.65 * ((dist - 1.8) / 4.2);
+      } else {
+        alpha = Math.min(0.98, 0.75 + 0.23 * (1.0 - Math.exp(-(dist - 6.0) / 6.0)));
+      }
 
       smoothed[key] = {
         x: prev.x + dx * alpha,

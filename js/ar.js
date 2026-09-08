@@ -678,7 +678,7 @@ export class ArExperience {
 
       if (vw > 0 && vh > 0) {
         this.isScanning = true;
-        const maxScanDim = AR_CONFIG.cv?.maxScanDimension || 384;
+        const maxScanDim = AR_CONFIG.cv?.maxScanDimension || 512;
         let scanW, scanH;
         if (vw >= vh) {
           scanW = Math.min(vw, maxScanDim);
@@ -706,14 +706,14 @@ export class ArExperience {
       }
     }
 
-    // 2. Smooth continuous Slerp/Lerp pose interpolation (eliminates jitter & stickiness)
+    // 2. Smooth continuous Slerp/Lerp pose interpolation (eliminates hand tremor & jitter)
     if (this.isTrackingActive && this.hasTrackedPose) {
-      const lerpFactor = Math.min(1.0, 1.0 - Math.exp(-36.0 * delta));
+      const lerpFactor = Math.min(1.0, 1.0 - Math.exp(-28.0 * delta));
       this.markerGroup.position.lerp(this.targetPosition, lerpFactor);
       this.markerGroup.quaternion.slerp(this.targetQuaternion, lerpFactor);
     }
 
-    // 3. Update Model Animations (rotors, turbines, etc.)
+    // 3. Update Model Animations (skeletal characters, dancing skeleton, fluttering butterfly wings, rotors, etc.)
     this.modelLoader.update(delta);
 
     // 4. Time-normalized Model Auto-Rotation (consistent fast speed on mobile & desktop)
