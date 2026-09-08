@@ -126,6 +126,18 @@ class QuaternionFilter {
   }
 }
 
+// Pre-allocated scratch instances to eliminate GC overhead in 60/120 FPS render loops
+const _h1 = new THREE.Vector3();
+const _h2 = new THREE.Vector3();
+const _h3 = new THREE.Vector3();
+const _r1Raw = new THREE.Vector3();
+const _r2Raw = new THREE.Vector3();
+const _tRaw = new THREE.Vector3();
+const _rawPos = new THREE.Vector3();
+const _mat4 = new THREE.Matrix4();
+const _rotX = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+const _rawQuat = new THREE.Quaternion();
+
 /**
  * Main 6DOF AR Tracker
  */
@@ -346,44 +358,38 @@ export class ARTracker {
     const H = this.computeHomography(srcPts, dstPts);
     if (!H) return false;
 
-    // Column vectors of Homography in normalized camera coordinates
-    const h1 = new THREE.Vector3(H[0][0], H[1][0], H[2][0]);
-    const h2 = new THREE.Vector3(H[0][1], H[1][1], H[2][1]);
-    const h3 = new THREE.Vector3(H[0][2], H[1][2], H[2][2]);
+    // Column vectors of Homography in normalized camera coordinates (reusing scratch objects to avoid GC pressure)
+    _h1.set(H[0][0], H[1][0], H[2][0]);
+    _h2.set(H[0][1], H[1][1], H[2][1]);
+    _h3.set(H[0][2], H[1][2], H[2][2]);
 
-    const l1 = h1.length();
-    const l2 = h2.length();
+    const l1 = _h1.length();
+    const l2 = _h2.length();
     if (l1 === 0 || l2 === 0) return false;
 
     // Geometric mean scaling factor for optimal isometric projection
     const lambda = 1.0 / Math.sqrt(l1 * l2);
 
     // Initial rotation columns
-    const r1Raw = h1.clone().multiplyScalar(lambda);
-    const r2Raw = h2.clone().multiplyScalar(lambda);
-    const tRaw = h3.clone().multiplyScalar(lambda);
+    _r1Raw.copy(_h1).multiplyScalar(lambda);
+    _r2Raw.copy(_h2).multiplyScalar(lambda);
+    _tRaw.copy(_h3).multiplyScalar(lambda);
 
     // Ensure object is in front of camera (Z depth > 0)
-    if (tRaw.z < 0) {
-      r1Raw.negate();
-      r2Raw.negate();
-      tRaw.negate();
+    if (_tRaw.z < 0) {
+      _r1Raw.negate();
+      _r2Raw.negate();
+      _tRaw.negate();
     }
 
     // Orthonormalize rotation matrix to pure SO(3)
-    const { v1, v2, v3 } = this.orthonormalize(r1Raw, r2Raw);
+    const { v1, v2, v3 } = this.orthonormalize(_r1Raw, _r2Raw);
 
     // Construct 3D pose in Three.js coordinate system
-    // OpenCV: +X Right, +Y Down, +Z Forward
-    // Three.js: +X Right, +Y Up, +Z Backwards
-    // Coordinate conversion: Y_three = -Y_cv, Z_three = -Z_cv
-    const rawPos = new THREE.Vector3(tRaw.x, -tRaw.y, -tRaw.z);
+    _rawPos.set(_tRaw.x, -_tRaw.y, -_tRaw.z);
 
     // Rotation matrix in Three.js space
-    // We orient the marker such that +Y is the normal out of the physical marker (pointing UP from table)
-    // and +Z points toward user, +X points to right of marker
-    const m = new THREE.Matrix4();
-    m.set(
+    _mat4.set(
        v1.x, -v2.x, -v3.x, 0,
       -v1.y,  v2.y,  v3.y, 0,
       -v1.z,  v2.z,  v3.z, 0,
@@ -391,30 +397,85 @@ export class ARTracker {
     );
 
     // Orient marker coordinate system so standing upright models look natural on a flat table
-    const rotX = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
-    m.multiply(rotX);
+    _mat4.multiply(_rotX);
 
-    const rawQuat = new THREE.Quaternion().setFromRotationMatrix(m);
+    _rawQuat.setFromRotationMatrix(_mat4);
 
     // Apply One-Euro filter for smooth, low-jitter motion
-    this.currentPosition = this.posFilter.filter(rawPos, timestamp);
-    this.currentQuaternion = this.quatFilter.filter(rawQuat, timestamp);
+    this.currentPosition = this.posFilter.filter(_rawPos, timestamp);
+    this.currentQuaternion = this.quatFilter.filter(_rawQuat, timestamp);
 
     this.lastDetectedTime = timestamp;
     return true;
   }
 
   /**
-   * Process a video frame with downscale scaling support for instant 60 FPS CV tracking
-   * @param {ImageData} imageData - Downscaled or full image data from canvas
-   * @param {Function} jsQRFunction - Reference to jsQR library function
-   * @param {number} timestamp - Performance timestamp
-   * @param {number} scaleX - Horizontal scale factor from scan canvas to full video
-   * @param {number} scaleY - Vertical scale factor from scan canvas to full video
-   * @param {number} originalWidth - Full camera video width
-   * @param {number} originalHeight - Full camera video height
+   * Universal corner handler for both main-thread and Web Worker CV results
    */
-  processFrame(imageData, jsQRFunction, timestamp = performance.now(), scaleX = 1.0, scaleY = 1.0, originalWidth = null, originalHeight = null) {
+  handleDetectedCorners(corners, qrData, imgW, imgH, timestamp) {
+    this.rawCorners = corners;
+
+    // Notify QR URL / data decoded
+    if (qrData && qrData !== this.lastDecodedData) {
+      this.lastDecodedData = qrData;
+      this.onQrDecoded(qrData);
+    }
+
+    // Compute 6DOF pose in full video coordinate space
+    const success = this.estimatePose(corners, imgW, imgH, timestamp);
+
+    if (success) {
+      if (this.status === 'searching' || this.status === 'lost') {
+        this.setStatus('detected');
+        setTimeout(() => {
+          if (this.status === 'detected') this.setStatus('tracking');
+        }, 150);
+      } else {
+        this.setStatus('tracking');
+      }
+
+      this.onPoseUpdate({
+        position: this.currentPosition,
+        quaternion: this.currentQuaternion,
+        corners: this.rawCorners,
+        timestamp
+      });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Check decay timeout for tracking lost (smooth hysteresis hold)
+   */
+  checkDecayTimeout(timestamp = performance.now()) {
+    if (this.status === 'tracking' || this.status === 'detected') {
+      const lostTimeout = AR_CONFIG.cv?.trackingLostTimeoutMs || AR_CONFIG.trackingLostTimeoutMs || 750;
+      if (timestamp - this.lastDetectedTime > lostTimeout) {
+        this.setStatus('lost');
+        this.prevSmoothedCorners = null;
+        this.posFilter.reset();
+        this.quatFilter.reset();
+      }
+    }
+  }
+
+  /**
+   * Process results received asynchronously from the background QR Web Worker
+   */
+  processWorkerResult(msg) {
+    if (!msg) return;
+    if (msg.found && msg.corners) {
+      this.handleDetectedCorners(msg.corners, msg.data, msg.originalWidth, msg.originalHeight, msg.timestamp);
+    } else {
+      this.checkDecayTimeout(msg.timestamp);
+    }
+  }
+
+  /**
+   * Process a video frame synchronously (fallback when Web Worker is unavailable)
+   */
+  processFrame(imageData, jsQRFunction, timestamp = performance.now(), scaleX = 1.0, scaleY = 1.0, originalWidth = null, originalHeight = null, roiOffset = null) {
     if (!imageData || !jsQRFunction) return;
 
     // When searching or lost, attemptBoth ensures instant lock even under screen glare or dim lighting
@@ -425,57 +486,23 @@ export class ARTracker {
 
     const imgW = originalWidth || (imageData.width * scaleX);
     const imgH = originalHeight || (imageData.height * scaleY);
+    const ox = roiOffset ? roiOffset.x : 0;
+    const oy = roiOffset ? roiOffset.y : 0;
 
     if (code && code.location) {
       // Map detected corners accurately back to full video coordinates
       const corners = {
-        topLeft: { x: code.location.topLeftCorner.x * scaleX, y: code.location.topLeftCorner.y * scaleY },
-        topRight: { x: code.location.topRightCorner.x * scaleX, y: code.location.topRightCorner.y * scaleY },
-        bottomRight: { x: code.location.bottomRightCorner.x * scaleX, y: code.location.bottomRightCorner.y * scaleY },
-        bottomLeft: { x: code.location.bottomLeftCorner.x * scaleX, y: code.location.bottomLeftCorner.y * scaleY }
+        topLeft: { x: (code.location.topLeftCorner.x * scaleX) + ox, y: (code.location.topLeftCorner.y * scaleY) + oy },
+        topRight: { x: (code.location.topRightCorner.x * scaleX) + ox, y: (code.location.topRightCorner.y * scaleY) + oy },
+        bottomRight: { x: (code.location.bottomRightCorner.x * scaleX) + ox, y: (code.location.bottomRightCorner.y * scaleY) + oy },
+        bottomLeft: { x: (code.location.bottomLeftCorner.x * scaleX) + ox, y: (code.location.bottomLeftCorner.y * scaleY) + oy }
       };
 
-      this.rawCorners = corners;
-
-      // Notify QR URL / data decoded
-      if (code.data && code.data !== this.lastDecodedData) {
-        this.lastDecodedData = code.data;
-        this.onQrDecoded(code.data);
-      }
-
-      // Compute 6DOF pose in full video coordinate space
-      const success = this.estimatePose(corners, imgW, imgH, timestamp);
-
-      if (success) {
-        if (this.status === 'searching' || this.status === 'lost') {
-          this.setStatus('detected');
-          setTimeout(() => {
-            if (this.status === 'detected') this.setStatus('tracking');
-          }, 150);
-        } else {
-          this.setStatus('tracking');
-        }
-
-        this.onPoseUpdate({
-          position: this.currentPosition,
-          quaternion: this.currentQuaternion,
-          corners: this.rawCorners,
-          timestamp
-        });
-        return;
-      }
+      this.handleDetectedCorners(corners, code.data, imgW, imgH, timestamp);
+      return;
     }
 
-    // Check decay timeout for tracking lost (smooth hysteresis hold)
-    if (this.status === 'tracking' || this.status === 'detected') {
-      const lostTimeout = AR_CONFIG.cv?.trackingLostTimeoutMs || AR_CONFIG.trackingLostTimeoutMs || 750;
-      if (timestamp - this.lastDetectedTime > lostTimeout) {
-        this.setStatus('lost');
-        this.prevSmoothedCorners = null;
-        this.posFilter.reset();
-        this.quatFilter.reset();
-      }
-    }
+    this.checkDecayTimeout(timestamp);
   }
 
   /**

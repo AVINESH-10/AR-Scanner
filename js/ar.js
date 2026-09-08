@@ -127,32 +127,43 @@ export class ArExperience {
     this.camera.position.set(0, 0, 0); // AR Camera is at origin
     this.scene.add(this.camera);
 
-    // Alpha transparent WebGL renderer over the video element (optimized for mobile 60/120 FPS)
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance', precision: 'mediump' });
+    const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || width < 768;
+    this.isMobile = isMobile;
+
+    // Alpha transparent WebGL renderer over video (optimized for mobile 60/120 FPS)
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: !isMobile, // On mobile high-density screens, antialias is unnecessary and costly
+      alpha: true,
+      powerPreference: 'high-performance',
+      precision: 'mediump'
+    });
     this.renderer.setSize(width, height);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.25 : 1.5));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.2;
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // CRITICAL: Disable shadow maps in AR mode (AR renders over video stream with no floor receiver; eliminates invisible 2048x2048 depth pass)
+    this.renderer.shadowMap.enabled = false;
     this.renderer.domElement.id = 'threejs-ar-canvas';
 
     this.arCanvasContainer.appendChild(this.renderer.domElement);
 
-    // Setup production PBR lighting
-    ModelLoader.setupLighting(this.scene);
+    // Setup production PBR lighting with shadows disabled for AR camera performance
+    ModelLoader.setupLighting(this.scene, { castShadow: false });
 
     // Marker Anchor Group (Anchored to physical QR marker in 3D real space)
     this.markerGroup = new THREE.Group();
     this.markerGroup.visible = false; // Initially hidden until QR detected
     this.scene.add(this.markerGroup);
 
-    // Offscreen Canvas for ultra-fast downscaled jsQR image extraction
+    // Offscreen Canvas for downscaled jsQR image extraction
     this.scanCanvas = document.createElement('canvas');
     this.scanContext = this.scanCanvas.getContext('2d', { willReadFrequently: true });
     this.isScanning = false;
     this.lastScanTime = 0;
+
+    // Initialize dedicated background QR Computer Vision Web Worker
+    this.initWorker();
 
     // Resize listener
     window.addEventListener('resize', () => this.onResize());
@@ -160,6 +171,30 @@ export class ArExperience {
     // Start render loop
     this.renderLoop = this.renderLoop.bind(this);
     requestAnimationFrame(this.renderLoop);
+  }
+
+  initWorker() {
+    this.workerBusy = false;
+    this.isWorkerReady = false;
+    try {
+      this.qrWorker = new Worker('js/qr-worker.js');
+      this.qrWorker.onmessage = (e) => this.handleWorkerMessage(e.data);
+      this.qrWorker.onerror = (err) => {
+        console.warn("QR Web Worker error, falling back to main-thread CV:", err);
+        this.isWorkerReady = false;
+      };
+      this.isWorkerReady = true;
+    } catch (err) {
+      console.warn("Web Worker unavailable, using main-thread CV fallback:", err);
+      this.isWorkerReady = false;
+    }
+  }
+
+  handleWorkerMessage(msg) {
+    this.workerBusy = false;
+    if (this.tracker) {
+      this.tracker.processWorkerResult(msg);
+    }
   }
 
   onResize() {
@@ -685,39 +720,95 @@ export class ArExperience {
     // Precise delta time capped to prevent animation skipping
     const delta = Math.min(this.clock.getDelta(), 0.05);
 
-    // 1. Decoupled throttled CV processing (runs at optimal ~30 scans/sec, freeing the 60/120 FPS WebGL render thread)
-    const scanInterval = this.isTrackingActive ? 30 : 50;
-    if (!this.isScanning && (timestamp - this.lastScanTime >= scanInterval) && this.videoElement && this.videoElement.readyState === this.videoElement.HAVE_ENOUGH_DATA) {
+    // 1. Off-thread Web Worker CV scanning with Region-of-Interest (ROI) micro-scanning
+    const scanInterval = this.isTrackingActive ? 40 : 60;
+    const canScanWorker = this.isWorkerReady && !this.workerBusy;
+    const canScanSync = !this.isWorkerReady && !this.isScanning;
+
+    if ((canScanWorker || canScanSync) && (timestamp - this.lastScanTime >= scanInterval) && this.videoElement && this.videoElement.readyState === this.videoElement.HAVE_ENOUGH_DATA) {
       const vw = this.videoElement.videoWidth;
       const vh = this.videoElement.videoHeight;
 
       if (vw > 0 && vh > 0) {
-        this.isScanning = true;
         this.lastScanTime = timestamp;
 
-        // Ensure minimum dimension is at least 480px so QR modules remain sharp on mobile cameras
-        const minDim = Math.min(vw, vh);
-        const targetMin = Math.min(minDim, 480);
-        const scanScale = targetMin / minDim;
-        const scanW = Math.round(vw * scanScale);
-        const scanH = Math.round(vh * scanScale);
+        let scanW, scanH, scaleX, scaleY, roiOffset = null;
+        const lastCorners = this.tracker?.rawCorners;
 
-        if (this.scanCanvas.width !== scanW || this.scanCanvas.height !== scanH) {
-          this.scanCanvas.width = scanW;
-          this.scanCanvas.height = scanH;
+        // Active tracking: perform ultra-fast Region-of-Interest (ROI) micro-scan (~2ms)
+        if (this.isTrackingActive && lastCorners && lastCorners.topLeft) {
+          const minX = Math.min(lastCorners.topLeft.x, lastCorners.topRight.x, lastCorners.bottomRight.x, lastCorners.bottomLeft.x);
+          const maxX = Math.max(lastCorners.topLeft.x, lastCorners.topRight.x, lastCorners.bottomRight.x, lastCorners.bottomLeft.x);
+          const minY = Math.min(lastCorners.topLeft.y, lastCorners.topRight.y, lastCorners.bottomRight.y, lastCorners.bottomLeft.y);
+          const maxY = Math.max(lastCorners.topLeft.y, lastCorners.topRight.y, lastCorners.bottomRight.y, lastCorners.bottomLeft.y);
+
+          const bw = maxX - minX;
+          const bh = maxY - minY;
+          const marginX = bw * 0.45;
+          const marginY = bh * 0.45;
+
+          const rx = Math.max(0, Math.floor(minX - marginX));
+          const ry = Math.max(0, Math.floor(minY - marginY));
+          const rw = Math.min(vw - rx, Math.ceil(bw + marginX * 2));
+          const rh = Math.min(vh - ry, Math.ceil(bh + marginY * 2));
+
+          const targetRoiDim = AR_CONFIG.cv?.roiScanDimension || 220;
+          const roiScale = Math.min(1.0, targetRoiDim / Math.max(rw, rh));
+          scanW = Math.max(80, Math.round(rw * roiScale));
+          scanH = Math.max(80, Math.round(rh * roiScale));
+
+          if (this.scanCanvas.width !== scanW || this.scanCanvas.height !== scanH) {
+            this.scanCanvas.width = scanW;
+            this.scanCanvas.height = scanH;
+          }
+
+          this.scanContext.drawImage(this.videoElement, rx, ry, rw, rh, 0, 0, scanW, scanH);
+          scaleX = rw / scanW;
+          scaleY = rh / scanH;
+          roiOffset = { x: rx, y: ry };
+        } else {
+          // Searching / lost: full-frame scan optimized to 360px short dimension
+          const minDim = Math.min(vw, vh);
+          const targetMin = AR_CONFIG.cv?.targetMinDimension || 360;
+          const scanScale = Math.min(1.0, targetMin / minDim);
+          scanW = Math.round(vw * scanScale);
+          scanH = Math.round(vh * scanScale);
+
+          if (this.scanCanvas.width !== scanW || this.scanCanvas.height !== scanH) {
+            this.scanCanvas.width = scanW;
+            this.scanCanvas.height = scanH;
+          }
+
+          this.scanContext.drawImage(this.videoElement, 0, 0, scanW, scanH);
+          scaleX = vw / scanW;
+          scaleY = vh / scanH;
         }
 
-        this.scanContext.drawImage(this.videoElement, 0, 0, scanW, scanH);
         const imageData = this.scanContext.getImageData(0, 0, scanW, scanH);
 
-        const scaleX = vw / scanW;
-        const scaleY = vh / scanH;
-
-        if (window.jsQR) {
-          this.tracker.processFrame(imageData, window.jsQR, timestamp, scaleX, scaleY, vw, vh);
+        if (this.isWorkerReady) {
+          this.workerBusy = true;
+          this.qrWorker.postMessage({
+            data: imageData.data.buffer,
+            width: scanW,
+            height: scanH,
+            timestamp,
+            scaleX,
+            scaleY,
+            originalWidth: vw,
+            originalHeight: vh,
+            roiOffset,
+            inversionAttempts: (!this.isTrackingActive) ? 'attemptBoth' : 'dontInvert'
+          }, [imageData.data.buffer]);
+        } else if (window.jsQR) {
+          this.isScanning = true;
+          this.tracker.processFrame(imageData, window.jsQR, timestamp, scaleX, scaleY, vw, vh, roiOffset);
+          this.isScanning = false;
         }
-        this.isScanning = false;
       }
+    } else if (this.isWorkerReady) {
+      // Keep tracking decay updated when worker is between frames
+      this.tracker.checkDecayTimeout(timestamp);
     }
 
     // 2. Smooth continuous Slerp/Lerp pose interpolation (eliminates hand tremor & jitter with high responsiveness)

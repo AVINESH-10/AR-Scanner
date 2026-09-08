@@ -103,14 +103,22 @@ export class GeneratorStudio {
     this.camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
     this.camera.position.set(2.2, 1.8, 2.5);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth < 768;
+    this.isMobile = isMobile;
+
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: !isMobile, // On mobile high-density screens, antialias is unnecessary and costly
+      alpha: false,
+      powerPreference: 'high-performance',
+      precision: isMobile ? 'mediump' : 'highp'
+    });
     this.renderer.setSize(width, height);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.25 : 2.0));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.1;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = isMobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     this.container.appendChild(this.renderer.domElement);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -121,8 +129,22 @@ export class GeneratorStudio {
     this.controls.maxDistance = 8.0;
     this.controls.target.set(0, 0.3, 0);
 
-    // Add PBR lighting
-    ModelLoader.setupLighting(this.scene);
+    // Add PBR lighting (mobile: 512 shadow map, desktop: 1024)
+    ModelLoader.setupLighting(this.scene, {
+      castShadow: true,
+      shadowMapSize: isMobile ? 512 : 1024
+    });
+
+    // Intersection Observer: Pause rendering when scrolled out of view on mobile to save GPU cycles
+    this.isViewVisible = true;
+    if (typeof IntersectionObserver !== 'undefined' && this.container) {
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          this.isViewVisible = entry.isIntersecting;
+        });
+      }, { threshold: 0.05 });
+      observer.observe(this.container);
+    }
 
     // Add marker representation plane
     this.markerPlane = ModelLoader.createMarkerPreviewPlane(1.2);
@@ -606,6 +628,10 @@ export class GeneratorStudio {
 
   animate() {
     requestAnimationFrame(this.animate);
+
+    // If preview card is scrolled completely off-screen on mobile, skip rendering to prevent GPU lag
+    if (!this.isViewVisible) return;
+
     const delta = Math.min(this.clock.getDelta(), 0.05);
 
     // Update animations (if any)

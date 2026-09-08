@@ -32,22 +32,28 @@ export class ModelLoader {
    * Ensures materials appear vibrant and realistic (never black or washed out)
    * @param {THREE.Scene} scene 
    */
-  static setupLighting(scene) {
+  static setupLighting(scene, options = {}) {
+    const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+    const castShadow = options.castShadow !== undefined ? options.castShadow : !isMobile;
+    const shadowMapSize = options.shadowMapSize || (isMobile ? 512 : 1024);
+
     // Soft ambient hemisphere light (sky light + ground bounce)
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x334155, 1.4);
     hemiLight.position.set(0, 50, 0);
     scene.add(hemiLight);
 
-    // Primary directional key light with high-precision soft shadows
+    // Primary directional key light
     const keyLight = new THREE.DirectionalLight(0xffffff, 1.6);
     keyLight.position.set(5, 12, 7);
-    keyLight.castShadow = true;
-    keyLight.shadow.mapSize.width = 2048;
-    keyLight.shadow.mapSize.height = 2048;
-    keyLight.shadow.camera.near = 0.05;
-    keyLight.shadow.camera.far = 30;
-    keyLight.shadow.bias = -0.0005;
-    keyLight.shadow.normalBias = 0.02;
+    if (castShadow) {
+      keyLight.castShadow = true;
+      keyLight.shadow.mapSize.width = shadowMapSize;
+      keyLight.shadow.mapSize.height = shadowMapSize;
+      keyLight.shadow.camera.near = 0.05;
+      keyLight.shadow.camera.far = 30;
+      keyLight.shadow.bias = -0.0005;
+      keyLight.shadow.normalBias = 0.02;
+    }
     scene.add(keyLight);
 
     // Secondary fill light for soft shadows and edge illumination
@@ -210,7 +216,7 @@ export class ModelLoader {
                   mat.depthWrite = true;
                   mat.depthTest = true;
                   if (mat.map) {
-                    mat.map.anisotropy = 16;
+                    mat.map.anisotropy = 4;
                     mat.map.colorSpace = THREE.SRGBColorSpace;
                   }
                   if (mat.emissiveMap) {
