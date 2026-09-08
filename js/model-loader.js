@@ -16,7 +16,7 @@ export class ModelLoader {
     this.mixer = null;
     this.animations = [];
     this.activeActions = [];
-    this.modelCache = new Map(); // url -> { scene, animations }
+    this.modelCache = new Map(); // url -> { rawScene, gltf, animations }
   }
 
   /**
@@ -88,6 +88,60 @@ export class ModelLoader {
   }
 
   /**
+   * Setup animation mixer and playback actions on target 3D model
+   * @param {THREE.Object3D} targetModel - Model root hierarchy
+   * @param {Array<THREE.AnimationClip>} animations - Animation clips
+   */
+  setupAnimations(targetModel, animations) {
+    if (this.mixer) {
+      this.mixer.stopAllAction();
+      this.mixer.uncacheRoot(this.mixer.getRoot());
+      this.mixer = null;
+    }
+    this.activeActions = [];
+    this.animations = animations || [];
+
+    if (!targetModel || !animations || animations.length === 0) {
+      return;
+    }
+
+    this.mixer = new THREE.AnimationMixer(targetModel);
+
+    // Play primary animation (or all non-conflicting animation clips)
+    const primaryClip = animations[0];
+    const primaryAction = this.mixer.clipAction(primaryClip);
+    primaryAction.reset();
+    primaryAction.setEffectiveTimeScale(1.0);
+    primaryAction.setEffectiveWeight(1.0);
+    primaryAction.setLoop(THREE.LoopRepeat, Infinity);
+    primaryAction.clampWhenFinished = false;
+    primaryAction.play();
+    this.activeActions.push(primaryAction);
+
+    // If there are other clips that do not conflict, play them as well
+    for (let i = 1; i < animations.length; i++) {
+      const clip = animations[i];
+      const nameLower = (clip.name || '').toLowerCase();
+      const primaryName = (primaryClip.name || '').toLowerCase();
+
+      // Avoid simultaneous Flying & Idle conflict
+      const isConflict = (primaryName.includes('fly') && nameLower.includes('idle')) ||
+                         (primaryName.includes('run') && nameLower.includes('idle')) ||
+                         (primaryName.includes('walk') && nameLower.includes('idle'));
+      if (!isConflict) {
+        const action = this.mixer.clipAction(clip);
+        action.reset();
+        action.setEffectiveTimeScale(1.0);
+        action.setEffectiveWeight(1.0);
+        action.setLoop(THREE.LoopRepeat, Infinity);
+        action.clampWhenFinished = false;
+        action.play();
+        this.activeActions.push(action);
+      }
+    }
+  }
+
+  /**
    * Load a GLB model from URL or Blob with caching, animation binding, and progress reporting
    * @param {string} url - Model URL or ObjectURL
    * @param {Function} onProgress - Progress callback: (percentage, loadedMb, totalMb) => {}
@@ -99,29 +153,19 @@ export class ModelLoader {
       if (this.modelCache.has(url)) {
         const cached = this.modelCache.get(url);
         // Use SkeletonUtils to cleanly clone skinned meshes, bones, and hierarchies
-        const clonedModel = SkeletonUtils.clone ? SkeletonUtils.clone(cached.scene) : cached.scene.clone(true);
+        const clonedScene = (SkeletonUtils && typeof SkeletonUtils.clone === 'function')
+          ? SkeletonUtils.clone(cached.rawScene)
+          : cached.rawScene.clone(true);
 
-        if (cached.animations && cached.animations.length > 0) {
-          this.mixer = new THREE.AnimationMixer(clonedModel);
-          this.animations = cached.animations;
-          this.activeActions = [];
-          cached.animations.forEach((clip) => {
-            const action = this.mixer.clipAction(clip);
-            action.reset();
-            action.setLoop(THREE.LoopRepeat, Infinity);
-            action.clampWhenFinished = false;
-            action.play();
-            this.activeActions.push(action);
-          });
-        } else {
-          this.mixer = null;
-          this.animations = [];
-          this.activeActions = [];
-        }
+        // Normalize wrapper for the cloned model
+        const normalizedWrapper = this.normalizeModel(clonedScene);
 
-        this.currentModel = clonedModel;
+        // Bind animation mixer to the cloned scene hierarchy
+        this.setupAnimations(clonedScene, cached.animations);
+
+        this.currentModel = normalizedWrapper;
         onProgress(100, '', '');
-        resolve(clonedModel);
+        resolve(normalizedWrapper);
         return;
       }
 
@@ -132,11 +176,13 @@ export class ModelLoader {
           this.currentGltf = gltf;
           const rawScene = gltf.scene;
 
-          // Process materials, high-precision textures and shadows
+          // Process materials, high-precision textures, double-sided rendering and shadows
           rawScene.traverse((child) => {
             if (child.isMesh) {
               child.castShadow = true;
               child.receiveShadow = true;
+              // Crucial for moving/flapping meshes: prevent bounding-box culling from hiding moving limbs
+              child.frustumCulled = false;
 
               if (child.geometry && !child.geometry.attributes.normal) {
                 child.geometry.computeVertexNormals();
@@ -160,33 +206,21 @@ export class ModelLoader {
             }
           });
 
-          // Normalize model size and center bounding box precisely at bottom center (Y=0)
-          const normalizedWrapper = this.normalizeModel(rawScene);
-
-          // Store template in cache for zero-latency subsequent scans
+          // Store pristine template in cache for zero-latency subsequent scans
           this.modelCache.set(url, {
-            scene: normalizedWrapper.clone(true),
+            rawScene: rawScene,
             animations: gltf.animations || []
           });
 
-          // Setup animation playback for all animation tracks
-          if (gltf.animations && gltf.animations.length > 0) {
-            this.mixer = new THREE.AnimationMixer(normalizedWrapper);
-            this.animations = gltf.animations;
-            this.activeActions = [];
-            gltf.animations.forEach((clip) => {
-              const action = this.mixer.clipAction(clip);
-              action.reset();
-              action.setLoop(THREE.LoopRepeat, Infinity);
-              action.clampWhenFinished = false;
-              action.play();
-              this.activeActions.push(action);
-            });
-          } else {
-            this.mixer = null;
-            this.animations = [];
-            this.activeActions = [];
-          }
+          // Clone from template for active display
+          const clonedScene = (SkeletonUtils && typeof SkeletonUtils.clone === 'function')
+            ? SkeletonUtils.clone(rawScene)
+            : rawScene.clone(true);
+
+          const normalizedWrapper = this.normalizeModel(clonedScene);
+
+          // Setup animation playback
+          this.setupAnimations(clonedScene, gltf.animations || []);
 
           this.currentModel = normalizedWrapper;
           resolve(normalizedWrapper);
@@ -212,7 +246,7 @@ export class ModelLoader {
 
   /**
    * Normalizes the model size to unit bounding box and centers its base at origin (0, 0, 0)
-   * with exact mathematical precision across complex mesh hierarchies
+   * using an external pivot group to keep internal bone/mesh animation tracks 100% intact
    * @param {THREE.Object3D} model 
    */
   normalizeModel(model) {
@@ -223,26 +257,23 @@ export class ModelLoader {
     box.getSize(size);
 
     const maxDim = Math.max(size.x, size.y, size.z);
-    if (maxDim > 0 && isFinite(maxDim)) {
-      const targetScale = 1.0 / maxDim;
-      model.scale.setScalar(targetScale);
-      model.updateMatrixWorld(true);
-    }
+    const targetScale = (maxDim > 0 && isFinite(maxDim)) ? (1.0 / maxDim) : 1.0;
 
-    // Recompute box with accurate transformed bounds
-    const normalizedBox = new THREE.Box3().setFromObject(model);
     const center = new THREE.Vector3();
-    normalizedBox.getCenter(center);
+    box.getCenter(center);
+    const minY = box.min.y;
 
-    // Center X and Z precisely at 0, and align model base at Y = 0
-    model.position.x -= center.x;
-    model.position.y -= normalizedBox.min.y;
-    model.position.z -= center.z;
-    model.updateMatrixWorld(true);
+    // Create pivot group to apply centering and uniform unit scale without overriding model's local transforms
+    const pivot = new THREE.Group();
+    pivot.name = "ModelPivot";
+    pivot.position.set(-center.x * targetScale, -minY * targetScale, -center.z * targetScale);
+    pivot.scale.setScalar(targetScale);
+    pivot.add(model);
 
-    // Wrap in a parent group so position offset stays clean
+    // Create wrapper root group
     const wrapper = new THREE.Group();
-    wrapper.add(model);
+    wrapper.name = "ModelWrapper";
+    wrapper.add(pivot);
     return wrapper;
   }
 
@@ -264,28 +295,14 @@ export class ModelLoader {
       this.mixer.stopAllAction();
       this.mixer = null;
     }
+    this.activeActions = [];
     this.currentModel = null;
   }
 
   /**
-   * Dispose current model assets
+   * Dispose current model assets safely without corrupting cached templates
    */
   dispose() {
     this.stopCurrentAnimation();
-    if (this.currentModel) {
-      this.currentModel.traverse((child) => {
-        if (child.isMesh) {
-          if (child.geometry) child.geometry.dispose();
-          if (child.material) {
-            if (Array.isArray(child.material)) {
-              child.material.forEach((m) => m.dispose());
-            } else {
-              child.material.dispose();
-            }
-          }
-        }
-      });
-      this.currentModel = null;
-    }
   }
 }
