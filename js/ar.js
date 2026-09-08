@@ -464,14 +464,23 @@ export class ArExperience {
       audio: false,
       video: {
         facingMode: { ideal: 'environment' },
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 60, min: 30 }
+        width: { ideal: AR_CONFIG.camera?.idealWidth || 1920 },
+        height: { ideal: AR_CONFIG.camera?.idealHeight || 1080 },
+        frameRate: { ideal: AR_CONFIG.camera?.frameRate || 60, min: 30 }
       }
     };
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (e) {
+        // Fallback for devices that don't support high resolution / high framerate constraints
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: 'environment' }
+        });
+      }
       this.videoElement.srcObject = stream;
       await this.videoElement.play();
 
@@ -713,7 +722,7 @@ export class ArExperience {
 
     // 2. Smooth continuous Slerp/Lerp pose interpolation (eliminates hand tremor & jitter with high responsiveness)
     if (this.isTrackingActive && this.hasTrackedPose) {
-      const lerpFactor = Math.min(1.0, 1.0 - Math.exp(-28.0 * delta));
+      const lerpFactor = Math.min(1.0, 1.0 - Math.exp(-30.0 * delta));
       this.markerGroup.position.lerp(this.targetPosition, lerpFactor);
       this.markerGroup.quaternion.slerp(this.targetQuaternion, lerpFactor);
     }

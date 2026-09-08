@@ -6,6 +6,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 
 export class ModelLoader {
   constructor() {
@@ -14,6 +15,7 @@ export class ModelLoader {
     this.currentGltf = null;
     this.activeMixer = null;
     this.activeActions = [];
+    this.animations = [];
     this.modelCache = new Map(); // url -> { model, mixer, actions }
   }
 
