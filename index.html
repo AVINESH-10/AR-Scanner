@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Custom WebAR — 3D QR Augmented Reality (No Unity)</title>
+  <meta name="description" content="Production-grade browser-based WebAR system. Spatial 3D GLB models anchored directly above physical QR code markers in real-time 6DOF.">
+  <link rel="stylesheet" href="css/style.css">
+  
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div class="ambient-bg">
+    <div class="ambient-blob blob-1"></div>
+    <div class="ambient-blob blob-2"></div>
+    <div class="ambient-blob blob-3"></div>
+  </div>
+
+  <!-- Top Navigation -->
+  <nav class="navbar">
+    <a href="index.html" class="nav-brand">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+      </svg>
+      <span>Custom WebAR</span>
+      <span class="brand-badge">No Unity</span>
+    </a>
+    <div class="nav-links">
+      <a href="#how-it-works" class="nav-link">How It Works</a>
+      <a href="#models" class="nav-link">3D Models</a>
+      <a href="generator.html" class="nav-link">QR Generator</a>
+      <a href="generator.html" class="btn btn-primary btn-sm">Create AR</a>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <header class="hero">
+    <div class="hero-tag">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>
+      Physical 6DOF QR Marker Tracking • Web Standards
+    </div>
+    <h1 class="hero-title">
+      Transform 3D GLB Models into<br>
+      <span class="text-gradient">Real-World Augmented Reality</span>
+    </h1>
+    <p class="hero-subtitle">
+      Zero Unity. Zero app installs. Upload your 3D models, generate a dual-purpose AR QR marker, scan with any mobile browser, and experience spatial 3D models locked onto the physical world.
+    </p>
+    <div class="hero-actions">
+      <a href="generator.html" class="btn btn-primary btn-lg">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>
+        Launch AR Studio
+      </a>
+      <a href="#models" class="btn btn-secondary btn-lg">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+        Try Live AR Demos
+      </a>
+    </div>
+  </header>
+
+  <!-- Workflow Section -->
+  <section id="how-it-works" class="section">
+    <div class="section-header">
+      <h2 class="section-title">How The System Works</h2>
+      <p class="section-subtitle">A seamless end-to-end pipeline from desktop configuration to physical mobile AR tracking.</p>
+    </div>
+    <div class="steps-grid">
+      <div class="step-card">
+        <div class="step-num">01</div>
+        <h3 class="step-title">Select or Upload Model</h3>
+        <p class="step-desc">Pick from built-in architecture & sci-fi assets or upload your own custom .glb / .gltf 3D file (0 – 50 MB).</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">02</div>
+        <h3 class="step-title">Configure in 3D</h3>
+        <p class="step-desc">Tune scale, height above marker, offsets, and rotation in the real-time OrbitControls studio.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">03</div>
+        <h3 class="step-title">Generate Dual QR</h3>
+        <p class="step-desc">Creates a high-contrast QR code that encodes the experience URL and serves as the physical AR tracking marker.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">04</div>
+        <h3 class="step-title">Scan & Experience AR</h3>
+        <p class="step-desc">Scan with your mobile camera. Point at the printed QR code and view the 3D model with jitter-free 6DOF precision.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Built-In Models Showcase -->
+  <section id="models" class="section">
+    <div class="section-header">
+      <h2 class="section-title">Explore Built-In 3D Experiences</h2>
+      <p class="section-subtitle">Instant interactive experiences pre-configured with PBR materials and optimal spatial scale.</p>
+    </div>
+    <div class="models-grid">
+      <!-- Taj Mahal -->
+      <div class="model-card">
+        <div class="model-card-header">
+          <div class="model-category">Architecture</div>
+          <h3 class="model-title">Taj Mahal</h3>
+        </div>
+        <p class="model-desc">World-famous historical monument featuring intricate architectural domes and minarets.</p>
+        <div class="model-card-actions">
+          <a href="generator.html?id=taj_mahal" class="btn btn-secondary btn-sm" style="flex:1;">Configure</a>
+          <button class="btn btn-primary btn-sm btn-launch-demo" data-model="taj_mahal" style="flex:1;">Open AR</button>
+        </div>
+      </div>
+
+      <!-- Eiffel Tower -->
+      <div class="model-card">
+        <div class="model-card-header">
+          <div class="model-category">Landmarks</div>
+          <h3 class="model-title">Eiffel Tower</h3>
+        </div>
+        <p class="model-desc">Iconic Parisian landmark engineered with intricate metallic lattice ironwork and realistic lighting.</p>
+        <div class="model-card-actions">
+          <a href="generator.html?id=eiffel_tower" class="btn btn-secondary btn-sm" style="flex:1;">Configure</a>
+          <button class="btn btn-primary btn-sm btn-launch-demo" data-model="eiffel_tower" style="flex:1;">Open AR</button>
+        </div>
+      </div>
+
+      <!-- Earth -->
+      <div class="model-card">
+        <div class="model-card-header">
+          <div class="model-category">Astronomy</div>
+          <h3 class="model-title">Earth Globe</h3>
+        </div>
+        <p class="model-desc">Photorealistic rotating planet Earth globe with continents, oceans, and atmospheric glow.</p>
+        <div class="model-card-actions">
+          <a href="generator.html?id=earth" class="btn btn-secondary btn-sm" style="flex:1;">Configure</a>
+          <button class="btn btn-primary btn-sm btn-launch-demo" data-model="earth" style="flex:1;">Open AR</button>
+        </div>
+      </div>
+
+      <!-- Spider -->
+      <div class="model-card">
+        <div class="model-card-header">
+          <div class="model-category">Creatures</div>
+          <h3 class="model-title">3D Spider</h3>
+        </div>
+        <p class="model-desc">Realistic articulated 3D spider model with detailed surface textures and natural proportions.</p>
+        <div class="model-card-actions">
+          <a href="generator.html?id=spider" class="btn btn-secondary btn-sm" style="flex:1;">Configure</a>
+          <button class="btn btn-primary btn-sm btn-launch-demo" data-model="spider" style="flex:1;">Open AR</button>
+        </div>
+      </div>
+
+      <!-- Spider-Man -->
+      <div class="model-card">
+        <div class="model-card-header">
+          <div class="model-category">Characters</div>
+          <h3 class="model-title">Spider-Man</h3>
+        </div>
+        <p class="model-desc">Detailed heroic character model featuring stylized textures and dynamic superhero stance.</p>
+        <div class="model-card-actions">
+          <a href="generator.html?id=the_amazing_spiderman" class="btn btn-secondary btn-sm" style="flex:1;">Configure</a>
+          <button class="btn btn-primary btn-sm btn-launch-demo" data-model="the_amazing_spiderman" style="flex:1;">Open AR</button>
+        </div>
+      </div>
+
+      <!-- Tower House -->
+      <div class="model-card">
+        <div class="model-card-header">
+          <div class="model-category">Architecture</div>
+          <h3 class="model-title">Tower House</h3>
+        </div>
+        <p class="model-desc">Modern multi-story architectural tower house with realistic glass windows and textures.</p>
+        <div class="model-card-actions">
+          <a href="generator.html?id=tower_house_design" class="btn btn-secondary btn-sm" style="flex:1;">Configure</a>
+          <button class="btn btn-primary btn-sm btn-launch-demo" data-model="tower_house_design" style="flex:1;">Open AR</button>
+        </div>
+      </div>
+
+      <!-- Helicopter -->
+      <div class="model-card">
+        <div class="model-card-header">
+          <div class="model-category">Aviation</div>
+          <h3 class="model-title">Tactical Helicopter</h3>
+        </div>
+        <p class="model-desc">Military transport helicopter with cockpit canopy, turbine engine, 4-blade rotor, and landing skids.</p>
+        <div class="model-card-actions">
+          <a href="generator.html?id=helicopter" class="btn btn-secondary btn-sm" style="flex:1;">Configure</a>
+          <button class="btn btn-primary btn-sm btn-launch-demo" data-model="helicopter" style="flex:1;">Open AR</button>
+        </div>
+      </div>
+
+      <!-- Drone -->
+      <div class="model-card">
+        <div class="model-card-header">
+          <div class="model-category">Robotics</div>
+          <h3 class="model-title">Quadcopter Drone</h3>
+        </div>
+        <p class="model-desc">Surveillance quadcopter equipped with carbon arms, dual-blade propellers, navigation LEDs, and gimbal camera.</p>
+        <div class="model-card-actions">
+          <a href="generator.html?id=drone" class="btn btn-secondary btn-sm" style="flex:1;">Configure</a>
+          <button class="btn btn-primary btn-sm btn-launch-demo" data-model="drone" style="flex:1;">Open AR</button>
+        </div>
+      </div>
+
+      <!-- Robot -->
+      <div class="model-card">
+        <div class="model-card-header">
+          <div class="model-category">Sci-Fi</div>
+          <h3 class="model-title">Cyber Sentinel Robot</h3>
+        </div>
+        <p class="model-desc">Futuristic humanoid android with metallic armor plates, glowing neon visor, and chest arc reactor core.</p>
+        <div class="model-card-actions">
+          <a href="generator.html?id=robot" class="btn btn-secondary btn-sm" style="flex:1;">Configure</a>
+          <button class="btn btn-primary btn-sm btn-launch-demo" data-model="robot" style="flex:1;">Open AR</button>
+        </div>
+      </div>
+
+      <!-- Cybercar -->
+      <div class="model-card">
+        <div class="model-card-header">
+          <div class="model-category">Vehicles</div>
+          <h3 class="model-title">Hyper Cybercar</h3>
+        </div>
+        <p class="model-desc">Aerodynamic electric supercar featuring detailed wheel rims, tinted canopy, front splitter, and rear wing.</p>
+        <div class="model-card-actions">
+          <a href="generator.html?id=car" class="btn btn-secondary btn-sm" style="flex:1;">Configure</a>
+          <button class="btn btn-primary btn-sm btn-launch-demo" data-model="car" style="flex:1;">Open AR</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>Custom WebAR 3D System &copy; 2026. Built with Three.js, WebGL &amp; WebRTC. 100% Web Standards • No Unity.</p>
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

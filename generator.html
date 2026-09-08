@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AR Experience Studio & QR Generator — Custom WebAR</title>
+  <meta name="description" content="Configure 3D GLB models in real-time 3D, tune scale and height, and generate high-contrast printable AR QR markers.">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/generator.css">
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+      "qrcode": "https://cdn.jsdelivr.net/npm/qrcode@1.5.3/+esm"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div class="ambient-bg">
+    <div class="ambient-blob blob-1"></div>
+    <div class="ambient-blob blob-2"></div>
+  </div>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="index.html" class="nav-brand">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+      </svg>
+      <span>Custom WebAR</span>
+      <span class="brand-badge">Studio</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">Home</a>
+      <a href="ar.html?id=helicopter" class="nav-link">Quick AR Demo</a>
+      <a href="index.html#how-it-works" class="nav-link">Guide</a>
+    </div>
+  </nav>
+
+  <!-- Studio Workspace -->
+  <main class="studio-container">
+    <!-- Left Column: 3D Preview Viewport -->
+    <div class="viewport-card">
+      <div class="viewport-header">
+        <div class="viewport-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="m10 15 5-3-5-3v6Z"></path></svg>
+          3D Marker Preview
+        </div>
+        <div class="viewport-hint">Drag to orbit • Scroll to zoom</div>
+      </div>
+
+      <div id="preview-canvas-container">
+        <!-- Three.js Orbit Canvas injects here -->
+        <div id="preview-loading" class="loading-overlay" style="display: none;">
+          <div class="spinner"></div>
+          <div class="progress-track">
+            <div id="preview-progress-bar" class="progress-fill"></div>
+          </div>
+          <div id="preview-progress-text" class="progress-text">Loading 3D Model...</div>
+        </div>
+      </div>
+
+      <div style="padding: 1rem 1.5rem; background: rgba(15, 23, 42, 0.4); border-top: 1px solid rgba(255, 255, 255, 0.06); font-size: 0.85rem; color: var(--text-dim); display: flex; align-items: center; justify-content: space-between;">
+        <span>Blue grid plane represents the physical QR marker position.</span>
+        <button id="btn-reset-params" class="btn btn-secondary btn-sm">Reset Defaults</button>
+      </div>
+    </div>
+
+    <!-- Right Column: Model Selection & Configuration & QR Generator -->
+    <div class="controls-panel">
+      <!-- Model & File Selector Card -->
+      <div class="config-card">
+        <div class="card-heading">
+          <span>1. Select 3D Model</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Built-in Preset Catalogue</label>
+          <select id="model-select" class="select-input">
+            <option value="helicopter" selected>Tactical Helicopter (Aviation)</option>
+            <option value="drone">Quadcopter Drone (Robotics)</option>
+            <option value="robot">Cyber Sentinel Robot (Sci-Fi)</option>
+            <option value="car">Hyper Cybercar (Vehicles)</option>
+            <option value="taj_mahal">Taj Mahal (Architecture)</option>
+            <option value="eiffel_tower">Eiffel Tower (Landmarks)</option>
+            <option value="tower_house_design">Modern Tower House (Architecture)</option>
+            <option value="spider">3D Spider Creature (Creatures)</option>
+            <option value="the_amazing_spiderman">The Amazing Spider-Man (Characters)</option>
+            <option value="earth">Earth Globe (Astronomy)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Or Direct Remote 3D Model URL (.glb)</label>
+          <input type="url" id="input-model-url" class="text-input" placeholder="https://.../my-model.glb">
+        </div>
+
+        <div class="form-group">
+          <div class="form-label">
+            <span>Or Upload Local Model (.glb / .gltf)</span>
+            <span class="badge-accent" style="font-size: 0.75rem; background: rgba(56, 189, 248, 0.15); color: var(--primary); padding: 0.15rem 0.5rem; border-radius: 9999px; border: 1px solid rgba(56, 189, 248, 0.3);">Range: 0 – 50 MB</span>
+          </div>
+          <div class="file-dropzone">
+            <input type="file" id="file-upload" accept=".glb,.gltf">
+            <div class="dropzone-text">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin: 0 auto 0.35rem; display: block; color: var(--primary);"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+              <span class="dropzone-highlight">Click to browse</span> or drag & drop 3D file here<br>
+              <small style="color: var(--text-dim); font-size: 0.75rem;">Supported formats: .glb, .gltf • File size: 0 – 50 MB</small>
+            </div>
+          </div>
+          <div id="upload-status-hint" style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.4rem; display: none;"></div>
+        </div>
+      </div>
+
+      <!-- Spatial Positioning & Scaling Card -->
+      <div class="config-card">
+        <div class="card-heading">
+          <span>2. AR Spatial Calibration</span>
+        </div>
+
+        <!-- Scale -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Model Scale</span>
+            <span id="val-scale" class="form-value">0.75x</span>
+          </div>
+          <input type="range" id="ctrl-scale" class="range-slider" min="0.2" max="2.5" step="0.05" value="0.75">
+        </div>
+
+        <!-- Height above QR Plane -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Height Above QR (Y-Axis)</span>
+            <span id="val-height" class="form-value">0.12 m</span>
+          </div>
+          <input type="range" id="ctrl-height" class="range-slider" min="0.0" max="0.6" step="0.02" value="0.12">
+        </div>
+
+        <!-- X Offset -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>X Offset</span>
+            <span id="val-offset-x" class="form-value">0.00 m</span>
+          </div>
+          <input type="range" id="ctrl-offset-x" class="range-slider" min="-0.4" max="0.4" step="0.02" value="0">
+        </div>
+
+        <!-- Z Offset -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Z Offset</span>
+            <span id="val-offset-z" class="form-value">0.00 m</span>
+          </div>
+          <input type="range" id="ctrl-offset-z" class="range-slider" min="-0.4" max="0.4" step="0.02" value="0">
+        </div>
+
+        <!-- Initial Rotation Y -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Rotation Heading (Y-Axis)</span>
+            <span id="val-rotation" class="form-value">0°</span>
+          </div>
+          <input type="range" id="ctrl-rotation" class="range-slider" min="0" max="360" step="5" value="0">
+        </div>
+
+        <!-- Auto-Rotate Toggle -->
+        <div class="toggle-row">
+          <span style="font-size: 0.9rem; font-weight: 600;">Continuous Auto-Rotation</span>
+          <label class="switch">
+            <input type="checkbox" id="ctrl-auto-rotate">
+            <span class="slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Auto-Rotate Speed Slider -->
+        <div class="form-group" id="group-rotate-speed" style="margin-top: 0.75rem;">
+          <div class="form-label">
+            <span>Rotation Speed</span>
+            <span id="val-rotate-speed" class="form-value">3.5x (Fast)</span>
+          </div>
+          <input type="range" id="ctrl-rotate-speed" class="range-slider" min="0.01" max="0.15" step="0.005" value="0.05">
+        </div>
+      </div>
+
+      <!-- AR QR Code Generator Card -->
+      <div class="config-card">
+        <div class="card-heading">
+          <span>3. Generate AR QR Marker</span>
+        </div>
+
+        <!-- Update & Generate QR Code Button -->
+        <button type="button" id="btn-update-qr" class="btn btn-primary" style="width: 100%; margin-bottom: 0.75rem; font-size: 1rem; padding: 0.85rem; background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%);">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          ⚡ Update &amp; Generate QR Code
+        </button>
+
+        <div class="form-group" style="margin-top: 0.75rem;">
+          <label class="form-label">Target AR Webpage URL</label>
+          <input type="text" id="input-base-url" class="text-input" placeholder="https://nithish-cmd-afk.github.io/AR-overview/ar.html">
+        </div>
+
+        <!-- High-Contrast Printable QR Output Frame -->
+        <div class="qr-preview-container">
+          <canvas id="qr-output-canvas"></canvas>
+        </div>
+
+        <div class="qr-url-box" id="qr-url-text">Generating AR URL...</div>
+
+        <div class="qr-actions-grid">
+          <button id="btn-download-qr-png" class="btn btn-primary">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Download PNG
+          </button>
+          <button id="btn-launch-ar" class="btn btn-secondary">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            Open AR View
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script type="module" src="js/generator.js"></script>
+</body>
+</html>

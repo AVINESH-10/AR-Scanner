@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>3D WebAR Experience — Custom WebAR</title>
+  <meta name="description" content="Physical 6DOF QR marker tracking WebAR 3D experience.">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/ar.css">
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <!-- jsQR Marker Detector Library (Local bundle with CDN fallback) -->
+  <script src="js/libs/jsQR.js"></script>
+  <script>
+    if (!window.jsQR) {
+      document.write('<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"><\/script>');
+    }
+  </script>
+</head>
+<body>
+  <!-- Fullscreen WebRTC Camera Video Layer -->
+  <video id="camera-feed" autoplay playsinline muted></video>
+
+  <!-- Three.js 3D WebGL Overlay Canvas Layer -->
+  <div id="ar-viewport"></div>
+
+  <!-- AR Head-Up Display (HUD) Interface -->
+  <div class="ar-hud">
+    <!-- Top Bar: Navigation & Tracking Status & Fullscreen -->
+    <div class="hud-top-bar">
+      <a href="index.html" class="btn-icon" title="Exit AR">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"></path></svg>
+      </a>
+
+      <!-- Real-Time 6DOF Tracking State Pill -->
+      <div id="tracking-status-pill" class="status-pill searching">
+        <span id="tracking-status-dot" class="status-dot"></span>
+        <span id="tracking-status-text">SEARCHING FOR QR...</span>
+      </div>
+
+      <button id="btn-ar-fullscreen" class="btn-icon" title="Toggle Fullscreen">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+      </button>
+    </div>
+
+    <!-- Tracking Lost Alert Guide Banner -->
+    <div id="tracking-lost-banner" class="lost-banner" style="display: none;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+      <span>QR Marker Lost — Point camera at the QR code</span>
+    </div>
+
+    <!-- Bottom Controls Pill Drawer -->
+    <div class="hud-bottom-drawer">
+      <div class="hud-model-info">
+        <span class="hud-model-label">Augmented Reality</span>
+        <span id="hud-model-name" class="hud-model-title">TACTICAL HELICOPTER</span>
+      </div>
+
+      <div class="hud-controls-row">
+        <!-- Scale Stepper -->
+        <div class="scale-stepper">
+          <button id="btn-scale-minus" class="btn-step" title="Decrease Scale">−</button>
+          <span id="val-hud-scale" class="scale-display">0.8x</span>
+          <button id="btn-scale-plus" class="btn-step" title="Increase Scale">+</button>
+        </div>
+
+        <!-- Auto-Rotate Toggle -->
+        <button id="btn-toggle-auto-rotate" class="btn-toggle-auto">Auto Rotate: OFF</button>
+
+        <!-- Reset AR -->
+        <button id="btn-ar-reset" class="btn-hud-action">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div id="ar-loading" class="ar-modal-backdrop">
+    <div class="spinner" style="width: 50px; height: 50px; margin-bottom: 1.25rem;"></div>
+    <div class="progress-track" style="width: 260px; height: 8px; margin-bottom: 0.75rem;">
+      <div id="ar-progress-bar" class="progress-fill"></div>
+    </div>
+    <div id="ar-progress-text" class="progress-text" style="font-size: 1rem; color: #f8fafc;">Initializing WebAR...</div>
+  </div>
+
+  <!-- Error Modal -->
+  <div id="error-modal" class="ar-modal-backdrop" style="display: none;">
+    <div class="modal-dialog">
+      <h3 class="modal-title">Camera / System Notice</h3>
+      <p id="error-modal-msg" class="modal-body">Camera access is required for real-time marker tracking.</p>
+      <a href="index.html" class="btn btn-primary" style="width: 100%;">Return to Home</a>
+    </div>
+  </div>
+
+  <script type="module" src="js/ar.js"></script>
+</body>
+</html>

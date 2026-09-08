@@ -1,0 +1,22 @@
+{
+  "name": "custom-webar-qr-3d",
+  "version": "1.0.0",
+  "description": "Production-quality WebAR system with 6DOF QR-code marker tracking and Three.js 3D GLB rendering - No Unity",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "webar",
+    "augmented-reality",
+    "threejs",
+    "qr-tracking",
+    "6dof",
+    "webgl",
+    "glb",
+    "gltf"
+  ],
+  "author": "WebAR Team",
+  "license": "MIT"
+}
